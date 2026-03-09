@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# pre-push — Block pushes to main unless the pushed commit is at a version tag.
+#
+# Git calls pre-push with the remote name and URL as arguments,
+# and feeds ref info on stdin (one line per ref being pushed).
+
+# Exit on error, undefined variable, or pipe failure.
+set -euo pipefail
+
+# Read each ref line from stdin (git pre-push protocol).
+# Format: <local ref> <local sha> <remote ref> <remote sha>
+# -r prevents backslash mangling; -a reads into an array.
+# Bash read has no long form for -r.  shellcheck:ok
+while read -ra REF_LINE; do
+    # NOTE: We do not guard against the zero-OID (branch deletion) case.
+    # Deleting main remotely is not a supported workflow for this project.
+    LOCAL_SHA="${REF_LINE[1]}"
+    REMOTE_REF="${REF_LINE[2]}"
+
+    # Only enforce on pushes targeting main.
+    if [[ "$REMOTE_REF" != "refs/heads/main" ]]; then
+        continue
+    fi
+
+    # Check whether the local SHA is exactly at a version tag.
+    # --exact-match fails (exit 128) if the commit is not at any tag.
+    # --match 'v[0-9]*' restricts to version tags (excludes e.g. 'vendor/foo').
+    if ! git describe --tags --exact-match --match 'v[0-9]*' "$LOCAL_SHA" >/dev/null 2>&1; then
+        echo "" >&2
+        echo "Error: refusing to push to main — the commit being pushed is not at a version tag." >&2
+        echo "Run 'deno task release <major|minor|patch>' first." >&2
+        echo "" >&2
+        exit 1
+    fi
+done

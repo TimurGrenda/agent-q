@@ -1,0 +1,16 @@
+{
+  "version": "0.1.0",
+  "tasks": {
+    "agentqctl": "deno run --allow-read --allow-write --allow-env=AGENTQ_ACTOR --allow-run=git agentqctl.ts",
+    "agentq-init": "deno run --allow-read --allow-write agentq-init.ts",
+    "test": "deno test --allow-read --allow-write --allow-env --allow-run=git",
+    "install": "deno install --global --force --name agentq-init --config deno.json --allow-read --allow-write agentq-init.ts",
+    "release": "bash scripts/release.sh",
+    "install-hooks": "cp hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push && echo 'Pre-push hook installed.'"
+  },
+  "imports": {
+    "@std/cli": "jsr:@std/cli@^1",
+    "@std/assert": "jsr:@std/assert@^1",
+    "@std/testing": "jsr:@std/testing@^1"
+  }
+}
