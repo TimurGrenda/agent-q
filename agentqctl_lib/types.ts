@@ -33,7 +33,8 @@ export interface TaskData {
 
 export interface MetaData {
   nextId: number;
-  initVersion?: string;
+  schemaVersion: number;
+  agentqctlVersion?: string;
 }
 
 export type JsonObject = Record<string, unknown>;

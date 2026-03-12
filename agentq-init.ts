@@ -62,7 +62,8 @@ export async function runInit(
 
   // Write or update meta.json.
   // On first init: create with nextId=1. On re-init: preserve existing fields.
-  // Always stamps initVersion so consuming projects know which version was installed.
+  // Always stamps agentqctlVersion so consuming projects know which version was installed.
+  // schemaVersion tracks the meta.json/state file format — bump when changing schema.
   // Known limitation: nextId uses read-modify-write without file locking.
   // Concurrent agentq-init or next-id calls could allocate duplicate IDs.
   // Acceptable for single-agent CLI usage.
@@ -79,9 +80,12 @@ export async function runInit(
       throw e;
     }
   }
+  meta.schemaVersion = 1;
   if (version) {
-    meta.initVersion = version;
+    meta.agentqctlVersion = version;
   }
+  // Remove legacy field from older installations
+  delete meta.initVersion;
   await Deno.writeTextFile(
     metaPath,
     JSON.stringify(meta, null, 2) + "\n",
@@ -173,7 +177,8 @@ exec deno run --allow-read --allow-write --allow-env=AGENTQ_ACTOR --allow-run=gi
     script: "installed",
     wrapper: "installed",
     skills,
-    ...(version ? { initVersion: version } : {}),
+    schemaVersion: 1,
+    ...(version ? { agentqctlVersion: version } : {}),
   };
 }
 
