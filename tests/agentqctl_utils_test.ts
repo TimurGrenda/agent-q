@@ -1,8 +1,10 @@
 // agentqctl_utils_test.ts — Direct unit tests for exported utility functions.
 // These functions were previously only exercised indirectly through command handler tests.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { afterEach, beforeEach, describe, it, expect } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { dispatch } from "../agentqctl.ts";
 import { parseDeps } from "../agentqctl_lib/domain.ts";
 import { AgentqStore } from "../agentqctl_lib/store.ts";
@@ -19,36 +21,36 @@ import { createTestEpic, createTestTask, finalizeEpic, setupState } from "./test
 
 describe("slugify", () => {
   it("basic lowercase + hyphenation", () => {
-    assertEquals(slugify("Hello World"), "hello-world");
+    expect(slugify("Hello World")).toEqual("hello-world");
   });
 
   it("consecutive special chars collapse", () => {
-    assertEquals(slugify("a!!b"), "a-b");
+    expect(slugify("a!!b")).toEqual("a-b");
   });
 
   it("leading/trailing hyphens stripped", () => {
-    assertEquals(slugify("--hello--"), "hello");
+    expect(slugify("--hello--")).toEqual("hello");
   });
 
   it("empty string", () => {
-    assertEquals(slugify(""), "");
+    expect(slugify("")).toEqual("");
   });
 
   it("pure special chars", () => {
-    assertEquals(slugify("!!!"), "");
+    expect(slugify("!!!")).toEqual("");
   });
 
   it("numbers preserved", () => {
-    assertEquals(slugify("v2-beta"), "v2-beta");
+    expect(slugify("v2-beta")).toEqual("v2-beta");
   });
 
   it("unicode replaced", () => {
     // é is non-alphanumeric in the [^a-z0-9] regex, becomes hyphen, trailing stripped
-    assertEquals(slugify("café"), "caf");
+    expect(slugify("café")).toEqual("caf");
   });
 
   it("mixed case with numbers", () => {
-    assertEquals(slugify("Build Auth v2"), "build-auth-v2");
+    expect(slugify("Build Auth v2")).toEqual("build-auth-v2");
   });
 });
 
@@ -56,40 +58,40 @@ describe("slugify", () => {
 
 describe("isEpicId", () => {
   it("valid simple", () => {
-    assertEquals(isEpicId("1-foo"), true);
+    expect(isEpicId("1-foo")).toEqual(true);
   });
 
   it("valid multi-segment", () => {
-    assertEquals(isEpicId("123-multi-segment"), true);
+    expect(isEpicId("123-multi-segment")).toEqual(true);
   });
 
   it("valid single char slug", () => {
-    assertEquals(isEpicId("1-a"), true);
+    expect(isEpicId("1-a")).toEqual(true);
   });
 
   it("invalid: no slug", () => {
-    assertEquals(isEpicId("1-"), false);
+    expect(isEpicId("1-")).toEqual(false);
   });
 
   it("invalid: uppercase", () => {
-    assertEquals(isEpicId("1-Foo"), false);
+    expect(isEpicId("1-Foo")).toEqual(false);
   });
 
   it("invalid: task ID", () => {
-    assertEquals(isEpicId("1-foo.1"), false);
+    expect(isEpicId("1-foo.1")).toEqual(false);
   });
 
   it("invalid: empty string", () => {
-    assertEquals(isEpicId(""), false);
+    expect(isEpicId("")).toEqual(false);
   });
 
   it("invalid: old aq- prefix", () => {
-    assertEquals(isEpicId("aq-1-foo"), false);
+    expect(isEpicId("aq-1-foo")).toEqual(false);
   });
 
   it("zero number is allowed by regex", () => {
     // The regex allows 0 as the numeric part — this is by design
-    assertEquals(isEpicId("0-test"), true);
+    expect(isEpicId("0-test")).toEqual(true);
   });
 });
 
@@ -97,31 +99,31 @@ describe("isEpicId", () => {
 
 describe("isTaskId", () => {
   it("valid simple", () => {
-    assertEquals(isTaskId("1-foo.1"), true);
+    expect(isTaskId("1-foo.1")).toEqual(true);
   });
 
   it("valid large numbers", () => {
-    assertEquals(isTaskId("999-bar.123"), true);
+    expect(isTaskId("999-bar.123")).toEqual(true);
   });
 
   it("invalid: epic ID", () => {
-    assertEquals(isTaskId("1-foo"), false);
+    expect(isTaskId("1-foo")).toEqual(false);
   });
 
   it("invalid: trailing dot", () => {
-    assertEquals(isTaskId("1-foo."), false);
+    expect(isTaskId("1-foo.")).toEqual(false);
   });
 
   it("invalid: empty", () => {
-    assertEquals(isTaskId(""), false);
+    expect(isTaskId("")).toEqual(false);
   });
 
   it("invalid: double dot", () => {
-    assertEquals(isTaskId("1-foo.1.2"), false);
+    expect(isTaskId("1-foo.1.2")).toEqual(false);
   });
 
   it("invalid: old aq- prefix", () => {
-    assertEquals(isTaskId("aq-1-foo.1"), false);
+    expect(isTaskId("aq-1-foo.1")).toEqual(false);
   });
 });
 
@@ -130,53 +132,53 @@ describe("isTaskId", () => {
 describe("updateSpecSection", () => {
   it("append to empty markdown", () => {
     const result = updateSpecSection("", "Summary", "Done.");
-    assertEquals(result, "\n\n## Summary\n\nDone.\n");
+    expect(result).toEqual("\n\n## Summary\n\nDone.\n");
   });
 
   it("append new section to existing", () => {
     const input = "## Existing\n\nContent\n";
     const result = updateSpecSection(input, "Summary", "New stuff.");
     // Should contain original content and the new section
-    assertEquals(result.includes("## Existing"), true);
-    assertEquals(result.includes("Content"), true);
-    assertEquals(result.includes("## Summary"), true);
-    assertEquals(result.includes("New stuff."), true);
+    expect(result.includes("## Existing")).toEqual(true);
+    expect(result.includes("Content")).toEqual(true);
+    expect(result.includes("## Summary")).toEqual(true);
+    expect(result.includes("New stuff.")).toEqual(true);
   });
 
   it("replace existing section", () => {
     const input = "## Summary\n\nOld content\n\n## Next\n\nKeep this\n";
     const result = updateSpecSection(input, "Summary", "New content");
-    assertEquals(result.includes("New content"), true);
-    assertEquals(result.includes("Old content"), false);
-    assertEquals(result.includes("## Next"), true);
-    assertEquals(result.includes("Keep this"), true);
+    expect(result.includes("New content")).toEqual(true);
+    expect(result.includes("Old content")).toEqual(false);
+    expect(result.includes("## Next")).toEqual(true);
+    expect(result.includes("Keep this")).toEqual(true);
   });
 
   it("replace last section (no next heading)", () => {
     const input = "## Summary\n\nOld content\n";
     const result = updateSpecSection(input, "Summary", "New content");
-    assertEquals(result.includes("New content"), true);
-    assertEquals(result.includes("Old content"), false);
+    expect(result.includes("New content")).toEqual(true);
+    expect(result.includes("Old content")).toEqual(false);
   });
 
   it("section between two sections", () => {
     const input = "## A\n\nAlpha\n\n## B\n\nBravo\n\n## C\n\nCharlie\n";
     const result = updateSpecSection(input, "B", "Updated");
-    assertEquals(result.includes("## A"), true);
-    assertEquals(result.includes("Alpha"), true);
-    assertEquals(result.includes("Updated"), true);
-    assertEquals(result.includes("Bravo"), false); // original "Bravo" replaced
-    assertEquals(result.includes("## C"), true);
-    assertEquals(result.includes("Charlie"), true);
+    expect(result.includes("## A")).toEqual(true);
+    expect(result.includes("Alpha")).toEqual(true);
+    expect(result.includes("Updated")).toEqual(true);
+    expect(result.includes("Bravo")).toEqual(false); // original "Bravo" replaced
+    expect(result.includes("## C")).toEqual(true);
+    expect(result.includes("Charlie")).toEqual(true);
   });
 
   it("empty content replacement", () => {
     const input = "## Summary\n\nOld content\n\n## Next\n\nKeep\n";
     const result = updateSpecSection(input, "Summary", "");
-    assertEquals(result.includes("## Summary"), true);
-    assertEquals(result.includes("Old content"), false);
-    assertEquals(result.includes("## Next"), true);
-    assertEquals(result.includes("Keep"), true);
+    expect(result.includes("## Summary")).toEqual(true);
+    expect(result.includes("Old content")).toEqual(false);
+    expect(result.includes("## Next")).toEqual(true);
+    expect(result.includes("Keep")).toEqual(true);
   });
 });
 
@@ -184,61 +186,49 @@ describe("updateSpecSection", () => {
 
 describe("parseEvidence", () => {
   it("valid JSON object", () => {
-    assertEquals(parseEvidence('{"key":"val"}'), { key: "val" });
+    expect(parseEvidence('{"key":"val"}')).toEqual({ key: "val" });
   });
 
   it("undefined input", () => {
-    assertEquals(parseEvidence(undefined), undefined);
+    expect(parseEvidence(undefined)).toEqual(undefined);
   });
 
   it("empty string", () => {
-    assertEquals(parseEvidence(""), undefined);
+    expect(parseEvidence("")).toEqual(undefined);
   });
 
   it("invalid JSON", () => {
-    assertThrows(
-      () => parseEvidence("not json"),
-      Error,
+    expect(() => parseEvidence("not json")).toThrow(
       "Invalid evidence JSON",
     );
   });
 
   it("JSON array", () => {
-    assertThrows(
-      () => parseEvidence("[1,2,3]"),
-      Error,
+    expect(() => parseEvidence("[1,2,3]")).toThrow(
       "Evidence must be a JSON object",
     );
   });
 
   it("JSON null", () => {
-    assertThrows(
-      () => parseEvidence("null"),
-      Error,
+    expect(() => parseEvidence("null")).toThrow(
       "Evidence must be a JSON object",
     );
   });
 
   it("JSON string primitive", () => {
-    assertThrows(
-      () => parseEvidence('"hello"'),
-      Error,
+    expect(() => parseEvidence('"hello"')).toThrow(
       "Evidence must be a JSON object",
     );
   });
 
   it("JSON number", () => {
-    assertThrows(
-      () => parseEvidence("42"),
-      Error,
+    expect(() => parseEvidence("42")).toThrow(
       "Evidence must be a JSON object",
     );
   });
 
   it("JSON boolean", () => {
-    assertThrows(
-      () => parseEvidence("true"),
-      Error,
+    expect(() => parseEvidence("true")).toThrow(
       "Evidence must be a JSON object",
     );
   });
@@ -251,13 +241,13 @@ describe("parseDeps", () => {
   let store: AgentqStore;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     store = new AgentqStore(tempDir);
     await setupState(tempDir);
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   /** Helper: create an epic and N tasks, returning the epic ID. */
@@ -272,21 +262,19 @@ describe("parseDeps", () => {
 
   it("empty deps string", async () => {
     const result = await parseDeps(store, "", "1-test");
-    assertEquals(result, []);
+    expect(result).toEqual([]);
   });
 
   it("undefined deps", async () => {
     const result = await parseDeps(store, undefined, "1-test");
-    assertEquals(result, []);
+    expect(result).toEqual([]);
   });
 
   it("self-dependency", async () => {
     await createEpicWithTasks(1);
-    await assertRejects(
-      () => parseDeps(store, "1", "1-test", 1),
-      Error,
-      "cannot depend on itself",
-    );
+    expect(
+      parseDeps(store, "1", "1-test", 1),
+    ).rejects.toThrow("cannot depend on itself");
   });
 
   it("2-node cycle A->B->A", async () => {
@@ -298,11 +286,9 @@ describe("parseDeps", () => {
       tempDir,
     );
     // Now try to make .1 depend on .2 — should detect cycle: .1 -> .2 -> .1
-    await assertRejects(
-      () => parseDeps(store, "2", "1-test", 1),
-      Error,
-      "Circular dependency detected",
-    );
+    expect(
+      parseDeps(store, "2", "1-test", 1),
+    ).rejects.toThrow("Circular dependency detected");
   });
 
   it("3-node cycle A->B->C->A", async () => {
@@ -318,11 +304,9 @@ describe("parseDeps", () => {
       tempDir,
     );
     // Now try to make .1 depend on .3 — cycle: .1 -> .3 -> .2 -> .1
-    await assertRejects(
-      () => parseDeps(store, "3", "1-test", 1),
-      Error,
-      "Circular dependency detected",
-    );
+    expect(
+      parseDeps(store, "3", "1-test", 1),
+    ).rejects.toThrow("Circular dependency detected");
   });
 
   it("4-node cycle", async () => {
@@ -341,11 +325,9 @@ describe("parseDeps", () => {
       tempDir,
     );
     // Try to make .1 depend on .4 — cycle: .1 -> .4 -> .3 -> .2 -> .1
-    await assertRejects(
-      () => parseDeps(store, "4", "1-test", 1),
-      Error,
-      "Circular dependency detected",
-    );
+    expect(
+      parseDeps(store, "4", "1-test", 1),
+    ).rejects.toThrow("Circular dependency detected");
   });
 
   it("diamond (not a cycle)", async () => {
@@ -357,6 +339,6 @@ describe("parseDeps", () => {
     );
     // Adding .3 depends on .1 should succeed — .2 also depends on .1 but that's fine
     const result = await parseDeps(store, "1", "1-test", 3);
-    assertEquals(result, [1]);
+    expect(result).toEqual([1]);
   });
 });

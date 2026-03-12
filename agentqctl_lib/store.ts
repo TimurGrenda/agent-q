@@ -1,3 +1,4 @@
+import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
 import { type EpicData, type MetaData, type TaskData } from "./types.ts";
 import { epicIdFromTaskId, parseEpicNumber, parseTaskNumber } from "./utils.ts";
 
@@ -47,7 +48,7 @@ export class AgentqStore {
 
   async loadEpic(id: string): Promise<EpicData> {
     try {
-      const text = await Deno.readTextFile(this.epicStatePath(id));
+      const text = await readFile(this.epicStatePath(id), "utf-8");
       return JSON.parse(text) as EpicData;
     } catch (e) {
       if (e instanceof SyntaxError) {
@@ -58,8 +59,8 @@ export class AgentqStore {
   }
 
   async saveEpic(epic: EpicData): Promise<void> {
-    await Deno.mkdir(this.epicDir(epic.id), { recursive: true });
-    await Deno.writeTextFile(
+    await mkdir(this.epicDir(epic.id), { recursive: true });
+    await writeFile(
       this.epicStatePath(epic.id),
       JSON.stringify(epic, null, 2) + "\n",
     );
@@ -69,9 +70,8 @@ export class AgentqStore {
     const epicId = epicIdFromTaskId(id);
     const taskNum = parseTaskNumber(id);
     try {
-      const text = await Deno.readTextFile(this.taskStatePath(epicId, taskNum));
+      const text = await readFile(this.taskStatePath(epicId, taskNum), "utf-8");
       const data = JSON.parse(text) as TaskData;
-      // Backward compat: old task files created before title was required
       if (typeof data.title !== "string" || !data.title) {
         data.title = "(untitled)";
       }
@@ -87,8 +87,8 @@ export class AgentqStore {
   async saveTask(task: TaskData): Promise<void> {
     const epicId = epicIdFromTaskId(task.id);
     const taskNum = parseTaskNumber(task.id);
-    await Deno.mkdir(this.taskDir(epicId), { recursive: true });
-    await Deno.writeTextFile(
+    await mkdir(this.taskDir(epicId), { recursive: true });
+    await writeFile(
       this.taskStatePath(epicId, taskNum),
       JSON.stringify(task, null, 2) + "\n",
     );
@@ -97,7 +97,7 @@ export class AgentqStore {
   async loadMeta(): Promise<MetaData> {
     const metaPath = `${this.aqDir()}/meta.json`;
     try {
-      const raw = await Deno.readTextFile(metaPath);
+      const raw = await readFile(metaPath, "utf-8");
       return JSON.parse(raw) as MetaData;
     } catch {
       throw new Error(
@@ -108,19 +108,18 @@ export class AgentqStore {
 
   async saveMeta(meta: MetaData): Promise<void> {
     const metaPath = `${this.aqDir()}/meta.json`;
-    await Deno.writeTextFile(metaPath, JSON.stringify(meta, null, 2) + "\n");
+    await writeFile(metaPath, JSON.stringify(meta, null, 2) + "\n");
   }
 
-  /** Scan agentq/tasks/{epicId}/ for *.state.json files. Sort by task number. */
   async loadAllTasks(epicId: string): Promise<TaskData[]> {
     const dir = this.taskDir(epicId);
     const tasks: TaskData[] = [];
     try {
-      for await (const entry of Deno.readDir(dir)) {
-        if (entry.isFile && entry.name.endsWith(".state.json")) {
-          const text = await Deno.readTextFile(`${dir}/${entry.name}`);
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith(".state.json")) {
+          const text = await readFile(`${dir}/${entry.name}`, "utf-8");
           const data = JSON.parse(text) as TaskData;
-          // Backward compat: old task files created before title was required
           if (typeof data.title !== "string" || !data.title) {
             data.title = "(untitled)";
           }
@@ -135,16 +134,17 @@ export class AgentqStore {
     return tasks;
   }
 
-  /** Scan agentq/epics/ for directories. For each, read state.json. Sort by epic number. */
   async loadAllEpics(): Promise<EpicData[]> {
     const dir = `${this.aqDir()}/epics`;
     const epics: EpicData[] = [];
     try {
-      for await (const entry of Deno.readDir(dir)) {
-        if (entry.isDirectory) {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
           try {
-            const text = await Deno.readTextFile(
+            const text = await readFile(
               `${dir}/${entry.name}/state.json`,
+              "utf-8",
             );
             epics.push(JSON.parse(text) as EpicData);
           } catch {
@@ -160,12 +160,11 @@ export class AgentqStore {
     return epics;
   }
 
-  /** Copy a file from src to dst, creating parent directories as needed. */
   async copyFile(src: string, dst: string): Promise<void> {
-    const content = await Deno.readTextFile(src);
-    await Deno.mkdir(dst.substring(0, dst.lastIndexOf("/")), {
+    const content = await readFile(src, "utf-8");
+    await mkdir(dst.substring(0, dst.lastIndexOf("/")), {
       recursive: true,
     });
-    await Deno.writeTextFile(dst, content);
+    await writeFile(dst, content);
   }
 }

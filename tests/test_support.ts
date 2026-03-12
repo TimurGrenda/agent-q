@@ -1,25 +1,26 @@
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dispatch } from "../agentqctl.ts";
 
 /** Creates the agentq/ directory structure and default meta.json for tests. */
 export async function setupState(root: string): Promise<void> {
   const base = `${root}/agentq`;
   for (const sub of ["epics", "tasks", "logs"]) {
-    await Deno.mkdir(`${base}/${sub}`, { recursive: true });
+    await mkdir(`${base}/${sub}`, { recursive: true });
   }
 
   const metaPath = `${base}/meta.json`;
   try {
-    await Deno.stat(metaPath);
+    await stat(metaPath);
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      await Deno.writeTextFile(metaPath, JSON.stringify({ nextId: 1 }, null, 2) + "\n");
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      await writeFile(metaPath, JSON.stringify({ nextId: 1 }, null, 2) + "\n");
     } else {
       throw error;
     }
   }
 
   for (const sub of ["epics", "tasks", "logs"]) {
-    await Deno.writeTextFile(`${base}/${sub}/.gitkeep`, "");
+    await writeFile(`${base}/${sub}/.gitkeep`, "");
   }
 }
 
@@ -33,7 +34,7 @@ export async function createTestEpic(
   planContent?: string,
 ): Promise<string> {
   const planFile = `${tempDir}/_tmp_plan.md`;
-  await Deno.writeTextFile(
+  await writeFile(
     planFile,
     planContent ?? `# Plan: ${title}\n\n**Created**: 2026-01-01T00:00:00Z\n**Status**: Ready for implementation\n`,
   );
@@ -57,7 +58,7 @@ export async function createTestTask(
   title?: string,
 ): Promise<string> {
   const taskFile = `${tempDir}/_tmp_task.md`;
-  await Deno.writeTextFile(
+  await writeFile(
     taskFile,
     planContent ?? `## Description\n\n(No description yet)\n\n## Acceptance\n\n- [ ] TBD\n`,
   );
@@ -81,13 +82,13 @@ export async function finalizeEpic(tempDir: string, epicId?: string): Promise<st
 
 /** Sets AGENTQ_ACTOR for a test and returns a restore function. */
 export function withActor(actor: string): () => void {
-  const previous = Deno.env.get("AGENTQ_ACTOR");
-  Deno.env.set("AGENTQ_ACTOR", actor);
+  const previous = process.env.AGENTQ_ACTOR;
+  process.env.AGENTQ_ACTOR = actor;
   return () => {
     if (previous !== undefined) {
-      Deno.env.set("AGENTQ_ACTOR", previous);
+      process.env.AGENTQ_ACTOR = previous;
     } else {
-      Deno.env.delete("AGENTQ_ACTOR");
+      delete process.env.AGENTQ_ACTOR;
     }
   };
 }

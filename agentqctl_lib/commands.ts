@@ -1,3 +1,4 @@
+import { readFile, stat, writeFile } from "node:fs/promises";
 import {
   attemptEpicAutoClose,
   findScaffoldingEpic,
@@ -86,8 +87,8 @@ async function cmdEpicCreate(ctx: CommandContext): Promise<CommandExecution> {
     ? filePath
     : `${ctx.root}/${filePath}`;
   try {
-    const stat = await Deno.stat(resolvedFile);
-    if (!stat.isFile) throw new Error(`Not a file: ${filePath}`);
+    const s = await stat(resolvedFile);
+    if (!s.isFile()) throw new Error(`Not a file: ${filePath}`);
   } catch (e) {
     if ((e as Error).message.startsWith("Not a file")) throw e;
     throw new Error(`File not found: ${filePath}`);
@@ -112,7 +113,6 @@ async function cmdEpicCreate(ctx: CommandContext): Promise<CommandExecution> {
 }
 
 async function cmdEpicFinalize(ctx: CommandContext): Promise<CommandExecution> {
-  // Accept optional positional epic ID, otherwise find scaffolding epic
   const epicIdArg = ctx.positional[2];
   let epic: EpicData;
 
@@ -129,7 +129,6 @@ async function cmdEpicFinalize(ctx: CommandContext): Promise<CommandExecution> {
     );
   }
 
-  // Validate epic has at least one task
   const tasks = await ctx.store.loadAllTasks(epic.id);
   if (tasks.length === 0) {
     throw new Error(
@@ -159,30 +158,25 @@ async function cmdTaskCreate(ctx: CommandContext): Promise<CommandExecution> {
   }
   if (!filePath) throw new Error("--file is required");
 
-  // Find scaffolding epic
   const epic = await findScaffoldingEpic(ctx.store);
   const epicId = epic.id;
 
-  // Parse and validate deps (plain numbers)
   const deps = await parseDeps(ctx.store, depsStr, epicId);
 
-  // Assign next task number
   const taskNumber = await nextTaskNumber(ctx.store, epicId);
   const id = `${epicId}.${taskNumber}`;
 
-  // Validate source file exists
   const resolvedFile = filePath.startsWith("/")
     ? filePath
     : `${ctx.root}/${filePath}`;
   try {
-    const stat = await Deno.stat(resolvedFile);
-    if (!stat.isFile) throw new Error(`Not a file: ${filePath}`);
+    const s = await stat(resolvedFile);
+    if (!s.isFile()) throw new Error(`Not a file: ${filePath}`);
   } catch (e) {
     if ((e as Error).message.startsWith("Not a file")) throw e;
     throw new Error(`File not found: ${filePath}`);
   }
 
-  // Create task state
   const timestamp = now();
   const task: TaskData = {
     id,
@@ -196,7 +190,6 @@ async function cmdTaskCreate(ctx: CommandContext): Promise<CommandExecution> {
     createdAt: timestamp,
     updatedAt: timestamp,
   };
-  // Copy plan file first (before state) to prevent partial writes
   await ctx.store.copyFile(resolvedFile, ctx.store.taskPlanPath(epicId, taskNumber));
   await ctx.store.saveTask(task);
 
@@ -230,7 +223,6 @@ async function cmdStart(ctx: CommandContext): Promise<CommandExecution> {
 
   const task = await ctx.store.loadTask(id);
 
-  // Guard: cannot start tasks on an epic still in scaffolding state
   const epic = await ctx.store.loadEpic(task.epic);
   if (epic.status === "scaffolding") {
     throw new Error(
@@ -251,7 +243,6 @@ async function cmdStart(ctx: CommandContext): Promise<CommandExecution> {
     throw new Error(`Task ${id} is in code review`);
   }
 
-  // dependsOn contains task numbers; construct full IDs to check status
   const unmetIds: string[] = [];
   for (const depNum of task.dependsOn) {
     const depId = `${task.epic}.${depNum}`;
@@ -271,7 +262,6 @@ async function cmdStart(ctx: CommandContext): Promise<CommandExecution> {
   task.updatedAt = now();
   await ctx.store.saveTask(task);
 
-  // Transition epic from "open" to "in_progress" on first task start
   if (epic.status === "open") {
     epic.status = "in_progress";
     epic.updatedAt = now();
@@ -302,11 +292,10 @@ async function cmdDone(ctx: CommandContext): Promise<CommandExecution> {
 
   const parsedEvidence = parseEvidence(evidenceStr);
 
-  // Read the task plan file to append summary/evidence sections
   const epicId = epicIdFromTaskId(id);
   const taskNum = parseTaskNumber(id);
   const planPath = ctx.store.taskPlanPath(epicId, taskNum);
-  let markdown = await Deno.readTextFile(planPath);
+  let markdown = await readFile(planPath, "utf-8");
   if (summary) {
     markdown = updateSpecSection(markdown, "Done Summary", summary);
   }
@@ -317,7 +306,7 @@ async function cmdDone(ctx: CommandContext): Promise<CommandExecution> {
       "```json\n" + JSON.stringify(parsedEvidence, null, 2) + "\n```",
     );
   }
-  await Deno.writeTextFile(planPath, markdown);
+  await writeFile(planPath, markdown);
 
   task.status = "done";
   task.updatedAt = now();
@@ -370,7 +359,6 @@ async function cmdBlock(ctx: CommandContext): Promise<CommandExecution> {
     throw new Error(`Task ${id} is already blocked`);
   }
 
-  // If task is assigned (in_progress or code_review), only the assignee can block it
   if (task.assignee !== null) {
     const actor = await getActor();
     if (task.assignee !== actor) {
@@ -532,7 +520,7 @@ async function cmdCat(ctx: CommandContext): Promise<CommandExecution> {
   }
 
   try {
-    const content = await Deno.readTextFile(planPath);
+    const content = await readFile(planPath, "utf-8");
     return { output: { content }, epicId };
   } catch {
     throw new Error(`Plan not found for ${id}`);

@@ -35,18 +35,17 @@ export function validateEpicId(
 
 /** Return the current actor: env var AGENTQ_ACTOR, then git config user.name. */
 export async function getActor(): Promise<string> {
-  const envActor = Deno.env.get("AGENTQ_ACTOR");
+  const envActor = process.env.AGENTQ_ACTOR;
   if (envActor) return envActor;
 
-  const cmd = new Deno.Command("git", {
-    args: ["config", "user.name"],
-    stdout: "piped",
-    stderr: "piped",
+  const proc = Bun.spawn(["git", "config", "user.name"], {
+    stdout: "pipe",
+    stderr: "pipe",
   });
-  const output = await cmd.output();
-  if (output.success) {
-    const name = new TextDecoder().decode(output.stdout).trim();
-    if (name) return name;
+  const exitCode = await proc.exited;
+  if (exitCode === 0) {
+    const name = await new Response(proc.stdout).text();
+    if (name.trim()) return name.trim();
   }
   throw new Error(
     "Cannot determine actor: set AGENTQ_ACTOR or git config user.name",

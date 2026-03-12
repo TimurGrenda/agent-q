@@ -1,4 +1,4 @@
-import { parseArgs } from "@std/cli/parse-args";
+import parseArgs from "minimist";
 import { type CommandContext, COMMANDS } from "./commands.ts";
 import { AgentqStore } from "./store.ts";
 import type { CommandExecution, JsonObject, ParsedCliArgs } from "./types.ts";

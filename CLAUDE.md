@@ -1,11 +1,11 @@
 # agent-q
 
-File-based task/epic manager for AI agents. CLI controller (`agentqctl.ts`) plus bootstrapper (`agentq-init.ts`), running on Deno.
+File-based task/epic manager for AI agents. CLI controller (`agentqctl.ts`) plus bootstrapper (`agentq-init.ts`), running on Bun.
 
 ## Tech Stack
 
-- **Runtime**: Deno (native TypeScript, no build step)
-- **Dependencies**: `@std/cli` (runtime); `@std/assert`, `@std/testing` (tests)
+- **Runtime**: Bun (native TypeScript, no build step)
+- **Dependencies**: `minimist` (runtime); `bun-types` (dev)
 - **Storage**: Directory-based JSON + Markdown files in `agentq/`
 
 ## Project Structure
@@ -19,21 +19,17 @@ scripts/release.sh        # Semver bump + CHANGELOG update + commit + tag
 hooks/pre-push            # Blocks pushes to main unless at a version tag
 tests/                    # All test files (agentqctl_test, e2e, scheduler, utils, init)
 tests/test_support.ts     # Shared test fixtures/helpers
-deno.json                 # Task definitions and import map
+package.json              # Scripts, dependencies, and version
 ```
 
 ## Running
 
-Deno is installed at `~/.deno/bin/deno`. Add it to PATH before running:
-
 ```bash
-export PATH="$HOME/.deno/bin:$PATH"
-deno task agentqctl <command> [args]    # run CLI (in agent-q repo)
-deno task agentq-init                   # bootstrap CWD for agent-q
-deno task test                          # run tests
-deno task install                       # install agentq-init globally
-deno task release <major|minor|patch>   # bump version, update CHANGELOG, commit, tag
-deno task install-hooks                 # install git pre-push hook
+bun run agentqctl <command> [args]      # run CLI (in agent-q repo)
+bun run agentq-init                     # bootstrap CWD for agent-q
+bun test                                # run tests
+bun run release <major|minor|patch>     # bump version, update CHANGELOG, commit, tag
+bun run install-hooks                   # install git pre-push hook
 ```
 
 In consuming projects (after `agentq-init` has run):
@@ -50,7 +46,7 @@ agentq/agentqctl <command> [args]      # run CLI via local wrapper
 - All output is JSON. No human-readable format.
 - Store is directory-based: `agentq/meta.json` (ID counter), `agentq/epics/{id}/` (state.json + plan.md), `agentq/tasks/{epic-id}/` (N.state.json + N.plan.md).
 - Tests use temp directories and call `dispatch()` directly — no subprocess spawning.
-- `agentq-init.ts` copies `agentqctl.ts` and `agentqctl_lib/` into the target, generates a minimal `deno.json` (runtime imports only) and a shell wrapper, and copies skills to `.claude/skills/`.
+- `agentq-init.ts` copies `agentqctl.ts` and `agentqctl_lib/` into the target, generates a minimal `package.json` (runtime deps only) and a shell wrapper, and copies skills to `.claude/skills/`.
 - In consuming projects, `agentq/agentqctl` (shell wrapper) invokes the local copy of `agentqctl.ts`.
 
 ## Commands
