@@ -12,7 +12,7 @@ export async function setupState(root: string): Promise<void> {
     await Deno.stat(metaPath);
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
-      await Deno.writeTextFile(metaPath, JSON.stringify({ nextId: 1 }, null, 2) + "\n");
+      await Deno.writeTextFile(metaPath, JSON.stringify({ nextId: 1, schemaVersion: 1 }, null, 2) + "\n");
     } else {
       throw error;
     }

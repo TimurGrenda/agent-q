@@ -89,6 +89,20 @@ See `.llm-artefacts/user-decisions.md` for the full list. Highlights:
 
 Claude Code skills (`aq-work`, `aq-plan`) live in `skills/` in this repo. This is the **source of truth**. `agentq-init` copies them to `.claude/skills/` in the target project. Never edit installed copies directly.
 
+## Schema Versioning
+
+**HARD REQUIREMENT**: The `schemaVersion` field in `meta.json` tracks the storage format. You **MUST** bump `schemaVersion` (in `agentq-init.ts`) whenever you change:
+- The structure of `meta.json` (adding/removing/renaming fields)
+- The structure of `state.json` for epics or tasks (fields in `EpicData` or `TaskData`)
+- The directory layout under `agentq/` (new subdirectories, renamed paths)
+- Any on-disk format that existing installations depend on
+
+The current schema version is **1**. Bump it by incrementing the integer in `agentq-init.ts` where `meta.schemaVersion` is set, and update this section to reflect the new version number.
+
+`meta.json` carries two separate version properties:
+- `schemaVersion` (number, required) — the storage/state format version. Bump on schema changes.
+- `agentqctlVersion` (string, optional) — the semver of the agentqctl release that last ran `agentq-init`. Stamped automatically from `deno.json`. Informational only.
+
 ## Conventions
 
 - Public API from `agentqctl.ts`: `dispatch`, `runCommand`.

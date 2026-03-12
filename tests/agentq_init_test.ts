@@ -37,6 +37,7 @@ describe("agentq-init: fresh install", () => {
       await Deno.readTextFile(`${tempDir}/agentq/meta.json`),
     );
     assertEquals(meta.nextId, 1);
+    assertEquals(meta.schemaVersion, 1);
 
     // Verify .gitkeep files exist (plans/ no longer created)
     for (const sub of ["epics", "tasks", "logs"]) {
@@ -101,11 +102,14 @@ describe("agentq-init: idempotent re-run", () => {
     const result = await runInit(sourceDir, tempDir);
     assertEquals(result.state, "exists");
 
-    // meta.json NOT overwritten — nextId preserved
+    // meta.json NOT overwritten — nextId preserved, schemaVersion stamped
     const meta = JSON.parse(
       await Deno.readTextFile(`${tempDir}/agentq/meta.json`),
     );
     assertEquals(meta.nextId, 5);
+    assertEquals(meta.schemaVersion, 1);
+    // Legacy initVersion should be removed
+    assertEquals(meta.initVersion, undefined);
   });
 });
 
