@@ -1,3 +1,4 @@
+import { appendFile, stat } from "node:fs/promises";
 import type { JsonObject } from "./types.ts";
 import { now } from "./utils.ts";
 import { AgentqStore } from "./store.ts";
@@ -43,13 +44,11 @@ export async function appendLogEntry(
 
   let needsSeparator = false;
   try {
-    const stat = await Deno.stat(logPath);
-    needsSeparator = stat.size > 0;
+    const s = await stat(logPath);
+    needsSeparator = s.size > 0;
   } catch {
     // file does not exist
   }
 
-  await Deno.writeTextFile(logPath, (needsSeparator ? "\n" : "") + entry, {
-    append: true,
-  });
+  await appendFile(logPath, (needsSeparator ? "\n" : "") + entry);
 }

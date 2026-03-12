@@ -1,3 +1,4 @@
+import { readdir } from "node:fs/promises";
 import type { EpicData, TaskData } from "./types.ts";
 import { now, parseTaskNumber } from "./utils.ts";
 import { AgentqStore } from "./store.ts";
@@ -74,8 +75,9 @@ export async function nextTaskNumber(
   const dir = store.taskDir(epicId);
   let max = 0;
   try {
-    for await (const entry of Deno.readDir(dir)) {
-      if (entry.isFile && entry.name.endsWith(".state.json")) {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith(".state.json")) {
         const match = entry.name.match(/^(\d+)\.state\.json$/);
         if (match) {
           const value = parseInt(match[1], 10);

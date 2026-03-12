@@ -7,7 +7,7 @@
 # Exit on error, undefined variable, or pipe failure.
 set -euo pipefail
 
-DENO_JSON="deno.json"
+PACKAGE_JSON="package.json"
 CHANGELOG="CHANGELOG.md"
 
 # --- Validate argument ---
@@ -27,20 +27,20 @@ if [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 
-# --- Read current version from deno.json ---
+# --- Read current version from package.json ---
 
 # Extract the "version" field value using grep + sed (no jq dependency).
 # grep finds the line; sed strips everything except the version string.
-CURRENT_VERSION="$(grep --max-count=1 '"version"' "$DENO_JSON" | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"
+CURRENT_VERSION="$(grep --max-count=1 '"version"' "$PACKAGE_JSON" | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"
 
 if [[ -z "$CURRENT_VERSION" ]]; then
-    echo "Error: could not read version from $DENO_JSON" >&2
+    echo "Error: could not read version from $PACKAGE_JSON" >&2
     exit 1
 fi
 
 # Validate strict semver format (digits only, no pre-release suffixes).
 if [[ ! "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: version '$CURRENT_VERSION' in $DENO_JSON is not strict semver (X.Y.Z)." >&2
+    echo "Error: version '$CURRENT_VERSION' in $PACKAGE_JSON is not strict semver (X.Y.Z)." >&2
     exit 1
 fi
 
@@ -73,15 +73,15 @@ esac
 
 NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
 
-# --- Update deno.json version field ---
+# --- Update package.json version field ---
 
 # Replace the version string in-place. Match the exact old version to avoid
 # accidentally replacing version-like strings elsewhere in the file.
-sed --in-place "s/\"version\": \"${CURRENT_VERSION}\"/\"version\": \"${NEW_VERSION}\"/" "$DENO_JSON"
+sed --in-place "s/\"version\": \"${CURRENT_VERSION}\"/\"version\": \"${NEW_VERSION}\"/" "$PACKAGE_JSON"
 
 # Verify the replacement actually happened (sed exits 0 even on no match).
-if ! grep --quiet "\"version\": \"${NEW_VERSION}\"" "$DENO_JSON"; then
-    echo "Error: failed to update version in $DENO_JSON (sed pattern did not match)." >&2
+if ! grep --quiet "\"version\": \"${NEW_VERSION}\"" "$PACKAGE_JSON"; then
+    echo "Error: failed to update version in $PACKAGE_JSON (sed pattern did not match)." >&2
     exit 1
 fi
 
@@ -115,7 +115,7 @@ sed --in-place \
 # --- Commit and tag ---
 
 # Stage only the two files we changed.
-git add "$DENO_JSON" "$CHANGELOG"
+git add "$PACKAGE_JSON" "$CHANGELOG"
 
 # Create a release commit.
 git commit --message "release: v${NEW_VERSION}"

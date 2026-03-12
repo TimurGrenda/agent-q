@@ -28,7 +28,7 @@ while read -ra REF_LINE; do
     if ! git describe --tags --exact-match --match 'v[0-9]*' "$LOCAL_SHA" >/dev/null 2>&1; then
         echo "" >&2
         echo "Error: refusing to push to main — the commit being pushed is not at a version tag." >&2
-        echo "Run 'deno task release <major|minor|patch>' first." >&2
+        echo "Run 'bun run release <major|minor|patch>' first." >&2
         echo "" >&2
         exit 1
     fi

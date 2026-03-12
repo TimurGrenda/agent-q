@@ -1,12 +1,10 @@
 // WARNING: These tests mutate the AGENTQ_ACTOR env var (process-global).
 // Do NOT run with --parallel; tests across files will race on the env var.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import {
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
+import { afterEach, beforeEach, describe, it, expect } from "bun:test";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { dispatch } from "../agentqctl.ts";
 import { createTestEpic, createTestTask, finalizeEpic, setupState, withActor } from "./test_support.ts";
 
@@ -17,14 +15,14 @@ describe("e2e: diamond deps scheduler tie-breaking", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("next picks lowest-numbered task when multiple are ready", async () => {
@@ -41,7 +39,7 @@ describe("e2e: diamond deps scheduler tie-breaking", () => {
 
     // Only T1 ready initially
     const ready1 = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready1.tasks as Array<Record<string, unknown>>).length, 1);
+    expect((ready1.tasks as Array<Record<string, unknown>>).length).toEqual(1);
 
     // Complete T1
     await dispatch(["start", `${epicId}.1`], tempDir);
@@ -59,11 +57,11 @@ describe("e2e: diamond deps scheduler tie-breaking", () => {
     const readyIds = (ready2.tasks as Array<Record<string, unknown>>).map((t) =>
       t.id
     ).sort();
-    assertEquals(readyIds, [`${epicId}.2`, `${epicId}.3`]);
+    expect(readyIds).toEqual([`${epicId}.2`, `${epicId}.3`]);
 
     // next picks T2 (lowest number)
     const next1 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next1.task, `${epicId}.2`);
+    expect(next1.task).toEqual(`${epicId}.2`);
 
     // Complete T2, next picks T3
     await dispatch(["start", `${epicId}.2`], tempDir);
@@ -76,7 +74,7 @@ describe("e2e: diamond deps scheduler tie-breaking", () => {
       "{}",
     ], tempDir);
     const next2 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next2.task, `${epicId}.3`);
+    expect(next2.task).toEqual(`${epicId}.3`);
 
     // Complete T3, T4 becomes ready
     await dispatch(["start", `${epicId}.3`], tempDir);
@@ -89,7 +87,7 @@ describe("e2e: diamond deps scheduler tie-breaking", () => {
       "{}",
     ], tempDir);
     const next3 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next3.task, `${epicId}.4`);
+    expect(next3.task).toEqual(`${epicId}.4`);
 
     // Complete T4
     await dispatch(["start", `${epicId}.4`], tempDir);
@@ -102,7 +100,7 @@ describe("e2e: diamond deps scheduler tie-breaking", () => {
       "{}",
     ], tempDir);
     const nextFinal = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(nextFinal.reason, "all_tasks_done");
+    expect(nextFinal.reason).toEqual("all_tasks_done");
   });
 });
 
@@ -113,14 +111,14 @@ describe("e2e: multi-agent dependency handoff", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("alice");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("agent A completing work unblocks agent B through deps", async () => {
@@ -136,15 +134,15 @@ describe("e2e: multi-agent dependency handoff", () => {
     await finalizeEpic(tempDir);
 
     // Alice takes T1
-    Deno.env.set("AGENTQ_ACTOR", "alice");
+    process.env["AGENTQ_ACTOR"] = "alice";
     const aliceNext = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(aliceNext.task, `${epicId}.1`);
+    expect(aliceNext.task).toEqual(`${epicId}.1`);
     await dispatch(["start", `${epicId}.1`], tempDir);
 
     // Bob takes T3 (T1 is alice's, T2 has unmet deps)
-    Deno.env.set("AGENTQ_ACTOR", "bob");
+    process.env["AGENTQ_ACTOR"] = "bob";
     const bobNext = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(bobNext.task, `${epicId}.3`);
+    expect(bobNext.task).toEqual(`${epicId}.3`);
     await dispatch(["start", `${epicId}.3`], tempDir);
 
     // Bob finishes T3
@@ -159,10 +157,10 @@ describe("e2e: multi-agent dependency handoff", () => {
 
     // Bob has nothing left (T2 blocked by T1 which is alice's, T4 blocked by T2)
     const bobStuck = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(bobStuck.reason, "no_actionable_tasks");
+    expect(bobStuck.reason).toEqual("no_actionable_tasks");
 
     // Alice finishes T1 -> T2 becomes ready
-    Deno.env.set("AGENTQ_ACTOR", "alice");
+    process.env["AGENTQ_ACTOR"] = "alice";
     await dispatch([
       "done",
       `${epicId}.1`,
@@ -173,9 +171,9 @@ describe("e2e: multi-agent dependency handoff", () => {
     ], tempDir);
 
     // Bob can now pick up T2
-    Deno.env.set("AGENTQ_ACTOR", "bob");
+    process.env["AGENTQ_ACTOR"] = "bob";
     const bobNext2 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(bobNext2.task, `${epicId}.2`);
+    expect(bobNext2.task).toEqual(`${epicId}.2`);
     await dispatch(["start", `${epicId}.2`], tempDir);
     await dispatch([
       "done",
@@ -187,9 +185,9 @@ describe("e2e: multi-agent dependency handoff", () => {
     ], tempDir);
 
     // T4 is now ready (both T2 and T3 done)
-    Deno.env.set("AGENTQ_ACTOR", "alice");
+    process.env["AGENTQ_ACTOR"] = "alice";
     const aliceNext2 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(aliceNext2.task, `${epicId}.4`);
+    expect(aliceNext2.task).toEqual(`${epicId}.4`);
     await dispatch(["start", `${epicId}.4`], tempDir);
     await dispatch([
       "done",
@@ -201,7 +199,7 @@ describe("e2e: multi-agent dependency handoff", () => {
     ], tempDir);
 
     const nextFinal = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(nextFinal.reason, "all_tasks_done");
+    expect(nextFinal.reason).toEqual("all_tasks_done");
   });
 });
 
@@ -212,14 +210,14 @@ describe("e2e: all tasks claimed by others", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("alice");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("third agent gets no_actionable_tasks when all tasks are in_progress", async () => {
@@ -232,21 +230,21 @@ describe("e2e: all tasks claimed by others", () => {
     await finalizeEpic(tempDir);
 
     // Alice takes T1
-    Deno.env.set("AGENTQ_ACTOR", "alice");
+    process.env["AGENTQ_ACTOR"] = "alice";
     await dispatch(["start", `${epicId}.1`], tempDir);
 
     // Bob takes T2
-    Deno.env.set("AGENTQ_ACTOR", "bob");
+    process.env["AGENTQ_ACTOR"] = "bob";
     await dispatch(["start", `${epicId}.2`], tempDir);
 
     // Charlie has nothing
-    Deno.env.set("AGENTQ_ACTOR", "charlie");
+    process.env["AGENTQ_ACTOR"] = "charlie";
     const charlieNext = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(charlieNext.status, "none");
-    assertEquals(charlieNext.reason, "no_actionable_tasks");
+    expect(charlieNext.status).toEqual("none");
+    expect(charlieNext.reason).toEqual("no_actionable_tasks");
 
     // Alice finishes T1 — but no todo tasks remain for charlie
-    Deno.env.set("AGENTQ_ACTOR", "alice");
+    process.env["AGENTQ_ACTOR"] = "alice";
     await dispatch([
       "done",
       `${epicId}.1`,
@@ -257,12 +255,12 @@ describe("e2e: all tasks claimed by others", () => {
     ], tempDir);
 
     // Charlie still gets nothing (T1 done, T2 is bob's)
-    Deno.env.set("AGENTQ_ACTOR", "charlie");
+    process.env["AGENTQ_ACTOR"] = "charlie";
     const charlieNext2 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(charlieNext2.reason, "no_actionable_tasks");
+    expect(charlieNext2.reason).toEqual("no_actionable_tasks");
 
     // Bob finishes T2 -> all done
-    Deno.env.set("AGENTQ_ACTOR", "bob");
+    process.env["AGENTQ_ACTOR"] = "bob";
     await dispatch([
       "done",
       `${epicId}.2`,
@@ -272,9 +270,9 @@ describe("e2e: all tasks claimed by others", () => {
       "{}",
     ], tempDir);
 
-    Deno.env.set("AGENTQ_ACTOR", "charlie");
+    process.env["AGENTQ_ACTOR"] = "charlie";
     const charlieFinal = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(charlieFinal.reason, "all_tasks_done");
+    expect(charlieFinal.reason).toEqual("all_tasks_done");
   });
 });
 
@@ -285,14 +283,14 @@ describe("e2e: tasks status filters", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("filters blocked tasks and all four statuses simultaneously", async () => {
@@ -327,11 +325,10 @@ describe("e2e: tasks status filters", () => {
       ["tasks", "--epic", epicId, "--status", "done"],
       tempDir,
     );
-    assertEquals((done.tasks as Array<Record<string, unknown>>).length, 1);
-    assertEquals(
+    expect((done.tasks as Array<Record<string, unknown>>).length).toEqual(1);
+    expect(
       (done.tasks as Array<Record<string, unknown>>)[0].id,
-      `${epicId}.1`,
-    );
+    ).toEqual(`${epicId}.1`);
 
     const ip = await dispatch([
       "tasks",
@@ -340,11 +337,10 @@ describe("e2e: tasks status filters", () => {
       "--status",
       "in_progress",
     ], tempDir);
-    assertEquals((ip.tasks as Array<Record<string, unknown>>).length, 1);
-    assertEquals(
+    expect((ip.tasks as Array<Record<string, unknown>>).length).toEqual(1);
+    expect(
       (ip.tasks as Array<Record<string, unknown>>)[0].id,
-      `${epicId}.2`,
-    );
+    ).toEqual(`${epicId}.2`);
 
     const blocked = await dispatch([
       "tasks",
@@ -353,25 +349,23 @@ describe("e2e: tasks status filters", () => {
       "--status",
       "blocked",
     ], tempDir);
-    assertEquals((blocked.tasks as Array<Record<string, unknown>>).length, 1);
-    assertEquals(
+    expect((blocked.tasks as Array<Record<string, unknown>>).length).toEqual(1);
+    expect(
       (blocked.tasks as Array<Record<string, unknown>>)[0].id,
-      `${epicId}.3`,
-    );
+    ).toEqual(`${epicId}.3`);
 
     const todo = await dispatch(
       ["tasks", "--epic", epicId, "--status", "todo"],
       tempDir,
     );
-    assertEquals((todo.tasks as Array<Record<string, unknown>>).length, 1);
-    assertEquals(
+    expect((todo.tasks as Array<Record<string, unknown>>).length).toEqual(1);
+    expect(
       (todo.tasks as Array<Record<string, unknown>>)[0].id,
-      `${epicId}.4`,
-    );
+    ).toEqual(`${epicId}.4`);
 
     // Unfiltered returns all 4
     const all = await dispatch(["tasks", "--epic", epicId], tempDir);
-    assertEquals((all.tasks as Array<Record<string, unknown>>).length, 4);
+    expect((all.tasks as Array<Record<string, unknown>>).length).toEqual(4);
   });
 });
 
@@ -382,14 +376,14 @@ describe("e2e: plan content lifecycle", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("task plan with extra sections survives done with summary+evidence", async () => {
@@ -439,14 +433,14 @@ Important design decisions here
     const content = cat.content as string;
 
     // Original sections preserved
-    assertStringIncludes(content, "Custom task description");
-    assertStringIncludes(content, "Important design decisions here");
-    assertStringIncludes(content, "- [ ] It compiles");
-    assertStringIncludes(content, "https://example.com");
+    expect(content).toContain("Custom task description");
+    expect(content).toContain("Important design decisions here");
+    expect(content).toContain("- [ ] It compiles");
+    expect(content).toContain("https://example.com");
 
     // Done sections replaced
-    assertStringIncludes(content, "All tests pass");
-    assertStringIncludes(content, '"pass": true');
+    expect(content).toContain("All tests pass");
+    expect(content).toContain('"pass": true');
   });
 
   it("epic plan content is set at create time and readable via cat", async () => {
@@ -454,7 +448,7 @@ Important design decisions here
     await createTestEpic(tempDir, "Plan Read Test", "# Plan v1\n\nOriginal plan\n");
 
     const cat1 = await dispatch(["cat", "1-plan-read-test"], tempDir);
-    assertEquals(cat1.content, "# Plan v1\n\nOriginal plan\n");
+    expect(cat1.content).toEqual("# Plan v1\n\nOriginal plan\n");
   });
 });
 
@@ -465,14 +459,14 @@ describe("e2e: blocked branch in diamond", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("blocked branch prevents convergence task, unblock resolves", async () => {
@@ -517,21 +511,19 @@ describe("e2e: blocked branch in diamond", () => {
 
     // T4 can't proceed (needs T3), and T3 is blocked -> stuck
     const ready = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready.tasks as Array<unknown>).length, 0);
+    expect((ready.tasks as Array<unknown>).length).toEqual(0);
     const next = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next.reason, "no_actionable_tasks");
+    expect(next.reason).toEqual("no_actionable_tasks");
 
     // Unblock T3 -> it becomes ready
     await dispatch(["unblock", `${epicId}.3`], tempDir);
     const readyAfter = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals(
+    expect(
       (readyAfter.tasks as Array<Record<string, unknown>>).length,
-      1,
-    );
-    assertEquals(
+    ).toEqual(1);
+    expect(
       (readyAfter.tasks as Array<Record<string, unknown>>)[0].id,
-      `${epicId}.3`,
-    );
+    ).toEqual(`${epicId}.3`);
 
     // Complete T3 -> T4 becomes ready
     await dispatch(["start", `${epicId}.3`], tempDir);
@@ -544,7 +536,7 @@ describe("e2e: blocked branch in diamond", () => {
       "{}",
     ], tempDir);
     const next2 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next2.task, `${epicId}.4`);
+    expect(next2.task).toEqual(`${epicId}.4`);
 
     await dispatch(["start", `${epicId}.4`], tempDir);
     await dispatch([
@@ -556,7 +548,7 @@ describe("e2e: blocked branch in diamond", () => {
       "{}",
     ], tempDir);
     const nextFinal = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(nextFinal.reason, "all_tasks_done");
+    expect(nextFinal.reason).toEqual("all_tasks_done");
   });
 });
 
@@ -567,14 +559,14 @@ describe("e2e: next priority own in_progress", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("returns own in_progress over multiple ready tasks", async () => {
@@ -593,8 +585,8 @@ describe("e2e: next priority own in_progress", () => {
 
     // next must return T3 with reason "in_progress", not T1
     const next = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next.task, `${epicId}.3`);
-    assertEquals(next.reason, "in_progress");
+    expect(next.task).toEqual(`${epicId}.3`);
+    expect(next.reason).toEqual("in_progress");
 
     // After completing T3, next returns T1 (lowest ready)
     await dispatch([
@@ -606,8 +598,8 @@ describe("e2e: next priority own in_progress", () => {
       "{}",
     ], tempDir);
     const next2 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next2.task, `${epicId}.1`);
-    assertEquals(next2.reason, "ready_task");
+    expect(next2.task).toEqual(`${epicId}.1`);
+    expect(next2.reason).toEqual("ready_task");
   });
 });
 
@@ -618,14 +610,14 @@ describe("e2e: multiple in_progress same actor", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("actor can start multiple tasks and next returns the first one", async () => {
@@ -644,8 +636,8 @@ describe("e2e: multiple in_progress same actor", () => {
 
     // next returns T1 (first in_progress by task number)
     const next = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next.task, `${epicId}.1`);
-    assertEquals(next.reason, "in_progress");
+    expect(next.task).toEqual(`${epicId}.1`);
+    expect(next.reason).toEqual("in_progress");
 
     // Complete T1, next returns T2 (now first in_progress)
     await dispatch([
@@ -657,8 +649,8 @@ describe("e2e: multiple in_progress same actor", () => {
       "{}",
     ], tempDir);
     const next2 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next2.task, `${epicId}.2`);
-    assertEquals(next2.reason, "in_progress");
+    expect(next2.task).toEqual(`${epicId}.2`);
+    expect(next2.reason).toEqual("in_progress");
 
     // Complete T2, next returns T3 (ready)
     await dispatch([
@@ -670,8 +662,8 @@ describe("e2e: multiple in_progress same actor", () => {
       "{}",
     ], tempDir);
     const next3 = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next3.task, `${epicId}.3`);
-    assertEquals(next3.reason, "ready_task");
+    expect(next3.task).toEqual(`${epicId}.3`);
+    expect(next3.reason).toEqual("ready_task");
   });
 });
 
@@ -682,14 +674,14 @@ describe("e2e: post-close behavior", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("read commands work on auto-closed epic", async () => {
@@ -711,28 +703,28 @@ describe("e2e: post-close behavior", () => {
 
     // Read commands still work
     const show = await dispatch(["show", epicId], tempDir);
-    assertEquals((show.epic as Record<string, unknown>).status, "done");
+    expect((show.epic as Record<string, unknown>).status).toEqual("done");
 
     const cat = await dispatch(["cat", epicId], tempDir);
-    assertStringIncludes(cat.content as string, "# Plan: Post Close");
+    expect(cat.content as string).toContain("# Plan: Post Close");
 
     const catTask = await dispatch(["cat", `${epicId}.1`], tempDir);
-    assertStringIncludes(catTask.content as string, "Done");
+    expect(catTask.content as string).toContain("Done");
 
     const showTask = await dispatch(["show", `${epicId}.1`], tempDir);
-    assertEquals((showTask.task as Record<string, unknown>).status, "done");
+    expect((showTask.task as Record<string, unknown>).status).toEqual("done");
 
     const list = await dispatch(["list"], tempDir);
-    assertEquals((list.epics as Array<Record<string, unknown>>).length, 1);
+    expect((list.epics as Array<Record<string, unknown>>).length).toEqual(1);
 
     const tasks = await dispatch(["tasks", "--epic", epicId], tempDir);
-    assertEquals((tasks.tasks as Array<Record<string, unknown>>).length, 1);
+    expect((tasks.tasks as Array<Record<string, unknown>>).length).toEqual(1);
 
     const ready = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready.tasks as Array<unknown>).length, 0);
+    expect((ready.tasks as Array<unknown>).length).toEqual(0);
 
     const next = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next.reason, "all_tasks_done");
+    expect(next.reason).toEqual("all_tasks_done");
   });
 });
 
@@ -743,14 +735,14 @@ describe("e2e: blocked dependency cascade", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("blocking T1 cascades: T2 and T3 stuck, recovery resolves in order", async () => {
@@ -769,19 +761,18 @@ describe("e2e: blocked dependency cascade", () => {
 
     // Nothing is ready
     const ready = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready.tasks as Array<unknown>).length, 0);
+    expect((ready.tasks as Array<unknown>).length).toEqual(0);
 
     const next = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next.reason, "no_actionable_tasks");
+    expect(next.reason).toEqual("no_actionable_tasks");
 
     // Unblock T1 -> only T1 is ready (T2 still depends on T1, T3 on T2)
     await dispatch(["unblock", `${epicId}.1`], tempDir);
     const ready2 = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready2.tasks as Array<Record<string, unknown>>).length, 1);
-    assertEquals(
+    expect((ready2.tasks as Array<Record<string, unknown>>).length).toEqual(1);
+    expect(
       (ready2.tasks as Array<Record<string, unknown>>)[0].id,
-      `${epicId}.1`,
-    );
+    ).toEqual(`${epicId}.1`);
 
     // Walk through the chain
     await dispatch(["start", `${epicId}.1`], tempDir);
@@ -795,11 +786,10 @@ describe("e2e: blocked dependency cascade", () => {
     ], tempDir);
 
     const ready3 = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready3.tasks as Array<Record<string, unknown>>).length, 1);
-    assertEquals(
+    expect((ready3.tasks as Array<Record<string, unknown>>).length).toEqual(1);
+    expect(
       (ready3.tasks as Array<Record<string, unknown>>)[0].id,
-      `${epicId}.2`,
-    );
+    ).toEqual(`${epicId}.2`);
 
     await dispatch(["start", `${epicId}.2`], tempDir);
     await dispatch([
@@ -812,11 +802,10 @@ describe("e2e: blocked dependency cascade", () => {
     ], tempDir);
 
     const ready4 = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready4.tasks as Array<Record<string, unknown>>).length, 1);
-    assertEquals(
+    expect((ready4.tasks as Array<Record<string, unknown>>).length).toEqual(1);
+    expect(
       (ready4.tasks as Array<Record<string, unknown>>)[0].id,
-      `${epicId}.3`,
-    );
+    ).toEqual(`${epicId}.3`);
 
     await dispatch(["start", `${epicId}.3`], tempDir);
     await dispatch([
@@ -828,7 +817,7 @@ describe("e2e: blocked dependency cascade", () => {
       "{}",
     ], tempDir);
     const nextFinal = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(nextFinal.reason, "all_tasks_done");
+    expect(nextFinal.reason).toEqual("all_tasks_done");
   });
 });
 
@@ -839,14 +828,14 @@ describe("e2e: set-deps clearing and re-adding", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("ready reflects each dep change in real time", async () => {
@@ -861,7 +850,7 @@ describe("e2e: set-deps clearing and re-adding", () => {
 
     // All 3 ready initially
     let ready = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready.tasks as Array<unknown>).length, 3);
+    expect((ready.tasks as Array<unknown>).length).toEqual(3);
 
     // Add dep: T3 depends on T1
     await dispatch(
@@ -869,12 +858,12 @@ describe("e2e: set-deps clearing and re-adding", () => {
       tempDir,
     );
     ready = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready.tasks as Array<unknown>).length, 2); // T1, T2
+    expect((ready.tasks as Array<unknown>).length).toEqual(2); // T1, T2
 
     // Clear deps on T3
     await dispatch(["task", "set-deps", `${epicId}.3`, "--deps", ""], tempDir);
     ready = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready.tasks as Array<unknown>).length, 3); // all ready again
+    expect((ready.tasks as Array<unknown>).length).toEqual(3); // all ready again
 
     // Add both: T3 depends on T1 and T2
     await dispatch([
@@ -885,7 +874,7 @@ describe("e2e: set-deps clearing and re-adding", () => {
       "1,2",
     ], tempDir);
     ready = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready.tasks as Array<unknown>).length, 2); // T1, T2
+    expect((ready.tasks as Array<unknown>).length).toEqual(2); // T1, T2
 
     // Complete T1
     await dispatch(["start", `${epicId}.1`], tempDir);
@@ -898,7 +887,7 @@ describe("e2e: set-deps clearing and re-adding", () => {
       "{}",
     ], tempDir);
     ready = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready.tasks as Array<unknown>).length, 1); // only T2 (T3 still needs T2)
+    expect((ready.tasks as Array<unknown>).length).toEqual(1); // only T2 (T3 still needs T2)
 
     // Remove T2 dep from T3, only keep T1 dep (which is done)
     await dispatch(
@@ -909,7 +898,7 @@ describe("e2e: set-deps clearing and re-adding", () => {
     const readyIds = (ready.tasks as Array<Record<string, unknown>>).map((t) =>
       t.id
     ).sort();
-    assertEquals(readyIds, [`${epicId}.2`, `${epicId}.3`]);
+    expect(readyIds).toEqual([`${epicId}.2`, `${epicId}.3`]);
   });
 });
 
@@ -922,13 +911,13 @@ describe("e2e: code_review lifecycle", () => {
   });
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("completes full lifecycle: init -> start -> review -> done -> auto-close", async () => {
@@ -945,12 +934,12 @@ describe("e2e: code_review lifecycle", () => {
     await dispatch(["start", `${epicId}.1`], tempDir);
 
     let show = await dispatch(["show", `${epicId}.1`], tempDir);
-    assertEquals((show.task as Record<string, unknown>).status, "in_progress");
+    expect((show.task as Record<string, unknown>).status).toEqual("in_progress");
 
     await dispatch(["review", `${epicId}.1`], tempDir);
 
     show = await dispatch(["show", `${epicId}.1`], tempDir);
-    assertEquals((show.task as Record<string, unknown>).status, "code_review");
+    expect((show.task as Record<string, unknown>).status).toEqual("code_review");
 
     await dispatch(
       [
@@ -965,11 +954,11 @@ describe("e2e: code_review lifecycle", () => {
     );
 
     show = await dispatch(["show", `${epicId}.1`], tempDir);
-    assertEquals((show.task as Record<string, unknown>).status, "done");
+    expect((show.task as Record<string, unknown>).status).toEqual("done");
 
     // T2 should now be ready (T1 is done)
     const ready = await dispatch(["ready", "--epic", epicId], tempDir);
-    assertEquals((ready.tasks as Array<unknown>).length, 1);
+    expect((ready.tasks as Array<unknown>).length).toEqual(1);
 
     // T2: start -> review -> block (code_review -> blocked) -> unblock -> start -> review -> done
     await dispatch(["start", `${epicId}.2`], tempDir);
@@ -980,7 +969,7 @@ describe("e2e: code_review lifecycle", () => {
     );
 
     show = await dispatch(["show", `${epicId}.2`], tempDir);
-    assertEquals((show.task as Record<string, unknown>).status, "blocked");
+    expect((show.task as Record<string, unknown>).status).toEqual("blocked");
 
     await dispatch(["unblock", `${epicId}.2`], tempDir);
     await dispatch(["start", `${epicId}.2`], tempDir);
@@ -992,15 +981,16 @@ describe("e2e: code_review lifecycle", () => {
 
     // All done — next should say so
     const next = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next.reason, "all_tasks_done");
+    expect(next.reason).toEqual("all_tasks_done");
 
     // Epic auto-closed
     const epicDisk = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/${epicId}/state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(epicDisk.status, "done");
+    expect(epicDisk.status).toEqual("done");
   });
 
   it("next returns code_review task at same priority as in_progress", async () => {
@@ -1018,9 +1008,9 @@ describe("e2e: code_review lifecycle", () => {
 
     // Next should return T1 with reason code_review (not T2)
     const next = await dispatch(["next", "--epic", epicId], tempDir);
-    assertEquals(next.status, "work");
-    assertEquals(next.task, `${epicId}.1`);
-    assertEquals(next.reason, "code_review");
+    expect(next.status).toEqual("work");
+    expect(next.task).toEqual(`${epicId}.1`);
+    expect(next.reason).toEqual("code_review");
   });
 
   it("tasks --status code_review filters correctly in e2e flow", async () => {
@@ -1043,9 +1033,9 @@ describe("e2e: code_review lifecycle", () => {
       tempDir,
     );
     const tasks = reviewTasks.tasks as Array<Record<string, unknown>>;
-    assertEquals(tasks.length, 1);
-    assertEquals(tasks[0].id, `${epicId}.1`);
-    assertEquals(tasks[0].status, "code_review");
+    expect(tasks.length).toEqual(1);
+    expect(tasks[0].id).toEqual(`${epicId}.1`);
+    expect(tasks[0].status).toEqual("code_review");
   });
 });
 
@@ -1056,14 +1046,14 @@ describe("e2e: scaffolding guard for ready and next", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("agent-alpha");
   });
 
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("ready rejects scaffolding epic", async () => {
@@ -1072,11 +1062,9 @@ describe("e2e: scaffolding guard for ready and next", () => {
     await createTestTask(tempDir);
 
     // Do NOT finalize — epic is still in scaffolding state
-    await assertRejects(
-      () => dispatch(["ready", "--epic", epicId], tempDir),
-      Error,
-      "scaffolding",
-    );
+    expect(
+      dispatch(["ready", "--epic", epicId], tempDir),
+    ).rejects.toThrow("scaffolding");
   });
 
   it("next rejects scaffolding epic", async () => {
@@ -1085,10 +1073,8 @@ describe("e2e: scaffolding guard for ready and next", () => {
     await createTestTask(tempDir);
 
     // Do NOT finalize — epic is still in scaffolding state
-    await assertRejects(
-      () => dispatch(["next", "--epic", epicId], tempDir),
-      Error,
-      "scaffolding",
-    );
+    expect(
+      dispatch(["next", "--epic", epicId], tempDir),
+    ).rejects.toThrow("scaffolding");
   });
 });

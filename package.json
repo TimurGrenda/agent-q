@@ -1,0 +1,19 @@
+{
+  "name": "agent-q",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "agentqctl": "bun run agentqctl.ts",
+    "agentq-init": "bun run agentq-init.ts",
+    "test": "bun test",
+    "release": "bash scripts/release.sh",
+    "install-hooks": "cp hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push && echo 'Pre-push hook installed.'"
+  },
+  "dependencies": {
+    "minimist": "^1.2.8"
+  },
+  "devDependencies": {
+    "@types/minimist": "^1.2.5",
+    "bun-types": "^1.3.9"
+  }
+}

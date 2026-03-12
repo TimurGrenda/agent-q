@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { afterEach, beforeEach, describe, it, expect } from "bun:test";
+import { mkdtemp, rm, readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { dispatch } from "../agentqctl.ts";
 import { appendLogEntry, formatLogEntry } from "../agentqctl_lib/logging.ts";
 import { AgentqStore } from "../agentqctl_lib/store.ts";
@@ -9,35 +11,37 @@ describe("epic create", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("creates epic with title and file", async () => {
     const epicId = await createTestEpic(tempDir, "Add User Auth");
-    assertEquals(epicId, "1-add-user-auth");
+    expect(epicId).toEqual("1-add-user-auth");
 
     // Verify state.json on disk
     const epic = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/1-add-user-auth/state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(epic.status, "scaffolding");
-    assertEquals(epic.id, "1-add-user-auth");
+    expect(epic.status).toEqual("scaffolding");
+    expect(epic.id).toEqual("1-add-user-auth");
   });
 
   it("copies plan file into epic directory", async () => {
     await createTestEpic(tempDir, "Plan Copy Test");
 
-    const plan = await Deno.readTextFile(
+    const plan = await readFile(
       `${tempDir}/agentq/epics/1-plan-copy-test/plan.md`,
+      "utf-8",
     );
-    assertStringIncludes(plan, "# Plan: Plan Copy Test");
+    expect(plan).toContain("# Plan: Plan Copy Test");
   });
 
   it("allocates epic IDs sequentially", async () => {
@@ -47,73 +51,55 @@ describe("epic create", () => {
     await finalizeEpic(tempDir);
 
     const id2 = await createTestEpic(tempDir, "Second");
-    assertEquals(id1, "1-first");
-    assertEquals(id2, "2-second");
+    expect(id1).toEqual("1-first");
+    expect(id2).toEqual("2-second");
   });
 
   it("errors when --title is missing", async () => {
     const planFile = `${tempDir}/_tmp.md`;
-    await Deno.writeTextFile(planFile, "# Plan\n");
-    await assertRejects(
-      () => dispatch(["epic", "create", "--file", planFile], tempDir),
-      Error,
-      "--title is required",
-    );
+    await writeFile(planFile, "# Plan\n");
+    await expect(dispatch(["epic", "create", "--file", planFile], tempDir)).rejects.toThrow("--title is required");
   });
 
   it("errors when --file is missing", async () => {
-    await assertRejects(
-      () => dispatch(["epic", "create", "--title", "Test"], tempDir),
-      Error,
-      "--file is required",
-    );
+    await expect(dispatch(["epic", "create", "--title", "Test"], tempDir)).rejects.toThrow("--file is required");
   });
 
   it("errors on nonexistent file", async () => {
-    await assertRejects(
-      () =>
-        dispatch([
+    await expect(dispatch([
           "epic",
           "create",
           "--title",
           "Test",
           "--file",
           `${tempDir}/nonexistent.md`,
-        ], tempDir),
-      Error,
-      "File not found",
-    );
+        ], tempDir)).rejects.toThrow("File not found");
   });
 
   it("errors when another epic is in scaffolding", async () => {
     await createTestEpic(tempDir, "First Epic");
 
     const planFile = `${tempDir}/_tmp2.md`;
-    await Deno.writeTextFile(planFile, "# Plan 2\n");
-    await assertRejects(
-      () =>
-        dispatch([
+    await writeFile(planFile, "# Plan 2\n");
+    await expect(dispatch([
           "epic",
           "create",
           "--title",
           "Second Epic",
           "--file",
           planFile,
-        ], tempDir),
-      Error,
-      "already in scaffolding state",
-    );
+        ], tempDir)).rejects.toThrow("already in scaffolding state");
   });
 
   it("returns scaffolding status in result", async () => {
     const planFile = `${tempDir}/_tmp.md`;
-    await Deno.writeTextFile(planFile, "# Plan\n");
+    await writeFile(planFile, "# Plan\n");
     const result = await dispatch(
       ["epic", "create", "--title", "Status Test", "--file", planFile],
       tempDir,
     );
-    assertEquals(result.status, "scaffolding");
-    assertEquals(result.id, "1-status-test");
+    expect(result.status).toEqual("scaffolding");
+    expect(result.id).toEqual("1-status-test");
   });
 });
 
@@ -121,45 +107,42 @@ describe("epic finalize", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("transitions scaffolding epic to open", async () => {
     const epicId = await createTestEpic(tempDir, "Finalize Test");
     await createTestTask(tempDir);
     const result = await dispatch(["epic", "finalize"], tempDir);
-    assertEquals(result.id, epicId);
-    assertEquals(result.status, "open");
+    expect(result.id).toEqual(epicId);
+    expect(result.status).toEqual("open");
 
     // Verify on disk
     const epic = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/1-finalize-test/state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(epic.status, "open");
+    expect(epic.status).toEqual("open");
   });
 
   it("accepts optional positional epic ID", async () => {
     const epicId = await createTestEpic(tempDir, "Positional Test");
     await createTestTask(tempDir);
     const result = await dispatch(["epic", "finalize", epicId], tempDir);
-    assertEquals(result.id, epicId);
-    assertEquals(result.status, "open");
+    expect(result.id).toEqual(epicId);
+    expect(result.status).toEqual("open");
   });
 
   it("errors when epic has no tasks", async () => {
     await createTestEpic(tempDir, "No Tasks");
-    await assertRejects(
-      () => dispatch(["epic", "finalize"], tempDir),
-      Error,
-      "has no tasks",
-    );
+    await expect(dispatch(["epic", "finalize"], tempDir)).rejects.toThrow("has no tasks");
   });
 
   it("errors when epic is not in scaffolding state", async () => {
@@ -167,19 +150,11 @@ describe("epic finalize", () => {
     await createTestTask(tempDir);
     await finalizeEpic(tempDir);
 
-    await assertRejects(
-      () => dispatch(["epic", "finalize", epicId], tempDir),
-      Error,
-      "not in scaffolding state",
-    );
+    await expect(dispatch(["epic", "finalize", epicId], tempDir)).rejects.toThrow("not in scaffolding state");
   });
 
   it("errors when no scaffolding epic exists", async () => {
-    await assertRejects(
-      () => dispatch(["epic", "finalize"], tempDir),
-      Error,
-      "No epic in scaffolding state",
-    );
+    await expect(dispatch(["epic", "finalize"], tempDir)).rejects.toThrow("No epic in scaffolding state");
   });
 });
 
@@ -187,80 +162,78 @@ describe("task create", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
     await createTestEpic(tempDir, "Auth Feature");
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("creates task with correct ID and fields", async () => {
     const taskId = await createTestTask(tempDir);
-    assertEquals(taskId, "1-auth-feature.1");
+    expect(taskId).toEqual("1-auth-feature.1");
 
     // Verify state.json on disk
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-auth-feature/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.id, "1-auth-feature.1");
-    assertEquals(task.epic, "1-auth-feature");
-    assertEquals(task.title, "Test task");
-    assertEquals(task.status, "todo");
-    assertEquals(task.assignee, null);
-    assertEquals(task.evidence, null);
-    assertEquals(task.blockReason, null);
-    assertEquals(task.dependsOn, []);
+    expect(task.id).toEqual("1-auth-feature.1");
+    expect(task.epic).toEqual("1-auth-feature");
+    expect(task.title).toEqual("Test task");
+    expect(task.status).toEqual("todo");
+    expect(task.assignee).toEqual(null);
+    expect(task.evidence).toEqual(null);
+    expect(task.blockReason).toEqual(null);
+    expect(task.dependsOn).toEqual([]);
   });
 
   it("copies plan file into task directory", async () => {
     await createTestTask(tempDir, "## Custom Task Plan\n\nDetails here.\n");
 
-    const plan = await Deno.readTextFile(
+    const plan = await readFile(
       `${tempDir}/agentq/tasks/1-auth-feature/1.plan.md`,
+      "utf-8",
     );
-    assertStringIncludes(plan, "## Custom Task Plan");
+    expect(plan).toContain("## Custom Task Plan");
   });
 
   it("allocates incrementing task numbers", async () => {
     const r1 = await createTestTask(tempDir);
     const r2 = await createTestTask(tempDir);
     const r3 = await createTestTask(tempDir);
-    assertEquals(r1, "1-auth-feature.1");
-    assertEquals(r2, "1-auth-feature.2");
-    assertEquals(r3, "1-auth-feature.3");
+    expect(r1).toEqual("1-auth-feature.1");
+    expect(r2).toEqual("1-auth-feature.2");
+    expect(r3).toEqual("1-auth-feature.3");
   });
 
   it("validates dependencies exist", async () => {
     const taskFile = `${tempDir}/_tmp_task.md`;
-    await Deno.writeTextFile(taskFile, "## Task\n");
+    await writeFile(taskFile, "## Task\n");
 
-    await assertRejects(
-      () =>
-        dispatch(
+    await expect(dispatch(
           ["task", "create", "--title", "Test", "--file", taskFile, "--deps", "99"],
           tempDir,
-        ),
-      Error,
-      "Task not found",
-    );
+        )).rejects.toThrow("Task not found");
   });
 
   it("creates task with valid dependencies", async () => {
     await createTestTask(tempDir);
     const taskId = await createTestTask(tempDir, undefined, [1]);
-    assertEquals(taskId, "1-auth-feature.2");
+    expect(taskId).toEqual("1-auth-feature.2");
 
     // Verify deps in state.json on disk
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-auth-feature/2.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.dependsOn, [1]);
+    expect(task.dependsOn).toEqual([1]);
   });
 
   it("errors when no scaffolding epic exists", async () => {
@@ -269,85 +242,58 @@ describe("task create", () => {
     await finalizeEpic(tempDir);
 
     const taskFile = `${tempDir}/_tmp_task.md`;
-    await Deno.writeTextFile(taskFile, "## Task\n");
+    await writeFile(taskFile, "## Task\n");
 
-    await assertRejects(
-      () => dispatch(["task", "create", "--title", "Test", "--file", taskFile], tempDir),
-      Error,
-      "No epic in scaffolding state",
-    );
+    await expect(dispatch(["task", "create", "--title", "Test", "--file", taskFile], tempDir)).rejects.toThrow("No epic in scaffolding state");
   });
 
   it("errors when --file is missing", async () => {
-    await assertRejects(
-      () => dispatch(["task", "create", "--title", "Test"], tempDir),
-      Error,
-      "--file is required",
-    );
+    await expect(dispatch(["task", "create", "--title", "Test"], tempDir)).rejects.toThrow("--file is required");
   });
 
   it("errors when --title is missing", async () => {
     const taskFile = `${tempDir}/_tmp_task.md`;
-    await Deno.writeTextFile(taskFile, "## Task\n");
-    await assertRejects(
-      () => dispatch(["task", "create", "--file", taskFile], tempDir),
-      Error,
-      "--title is required",
-    );
+    await writeFile(taskFile, "## Task\n");
+    await expect(dispatch(["task", "create", "--file", taskFile], tempDir)).rejects.toThrow("--title is required");
   });
 
   it("errors on multiline title", async () => {
     const taskFile = `${tempDir}/_tmp_task.md`;
-    await Deno.writeTextFile(taskFile, "## Task\n");
-    await assertRejects(
-      () =>
-        dispatch(
+    await writeFile(taskFile, "## Task\n");
+    await expect(dispatch(
           ["task", "create", "--title", "line1\nline2", "--file", taskFile],
           tempDir,
-        ),
-      Error,
-      "Title must be a single line",
-    );
+        )).rejects.toThrow("Title must be a single line");
   });
 
   it("errors on whitespace-only title", async () => {
     const taskFile = `${tempDir}/_tmp_task.md`;
-    await Deno.writeTextFile(taskFile, "## Task\n");
-    await assertRejects(
-      () =>
-        dispatch(
+    await writeFile(taskFile, "## Task\n");
+    await expect(dispatch(
           ["task", "create", "--title", "   ", "--file", taskFile],
           tempDir,
-        ),
-      Error,
-      "--title must not be blank",
-    );
+        )).rejects.toThrow("--title must not be blank");
   });
 
   it("errors on title exceeding 200 characters", async () => {
     const taskFile = `${tempDir}/_tmp_task.md`;
-    await Deno.writeTextFile(taskFile, "## Task\n");
+    await writeFile(taskFile, "## Task\n");
     const longTitle = "A".repeat(201);
-    await assertRejects(
-      () =>
-        dispatch(
+    await expect(dispatch(
           ["task", "create", "--title", longTitle, "--file", taskFile],
           tempDir,
-        ),
-      Error,
-      "Title must be 200 characters or fewer",
-    );
+        )).rejects.toThrow("Title must be 200 characters or fewer");
   });
 
   it("includes title in task create output", async () => {
     const taskFile = `${tempDir}/_tmp_task.md`;
-    await Deno.writeTextFile(taskFile, "## Task\n");
+    await writeFile(taskFile, "## Task\n");
     const result = await dispatch(
       ["task", "create", "--title", "My custom title", "--file", taskFile],
       tempDir,
     );
-    assertEquals(result.title, "My custom title");
-    assertEquals(result.id, "1-auth-feature.1");
+    expect(result.title).toEqual("My custom title");
+    expect(result.id).toEqual("1-auth-feature.1");
   });
 });
 
@@ -355,7 +301,7 @@ describe("task set-deps", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
     await createTestEpic(tempDir, "Deps Epic");
     // Create three tasks
@@ -366,7 +312,7 @@ describe("task set-deps", () => {
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("replaces existing dependencies", async () => {
@@ -375,54 +321,46 @@ describe("task set-deps", () => {
       ["task", "set-deps", "1-deps-epic.3", "--deps", "1,2"],
       tempDir,
     );
-    assertEquals(r1.dependsOn, [1, 2]);
+    expect(r1.dependsOn).toEqual([1, 2]);
 
     // Verify on disk
     let task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-deps-epic/3.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.dependsOn, [1, 2]);
+    expect(task.dependsOn).toEqual([1, 2]);
 
     // Now replace with just task 1
     const r2 = await dispatch(
       ["task", "set-deps", "1-deps-epic.3", "--deps", "1"],
       tempDir,
     );
-    assertEquals(r2.dependsOn, [1]);
+    expect(r2.dependsOn).toEqual([1]);
 
     // Verify task 2 is gone from deps
     task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-deps-epic/3.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.dependsOn, [1]);
+    expect(task.dependsOn).toEqual([1]);
   });
 
   it("rejects self-dependency", async () => {
-    await assertRejects(
-      () =>
-        dispatch(
+    await expect(dispatch(
           ["task", "set-deps", "1-deps-epic.1", "--deps", "1"],
           tempDir,
-        ),
-      Error,
-      "cannot depend on itself",
-    );
+        )).rejects.toThrow("cannot depend on itself");
   });
 
   it("rejects nonexistent dependency", async () => {
-    await assertRejects(
-      () =>
-        dispatch(
+    await expect(dispatch(
           ["task", "set-deps", "1-deps-epic.1", "--deps", "99"],
           tempDir,
-        ),
-      Error,
-      "Task not found",
-    );
+        )).rejects.toThrow("Task not found");
   });
 });
 
@@ -433,7 +371,7 @@ describe("start", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
     await createTestEpic(tempDir, "Workflow Epic");
@@ -442,7 +380,7 @@ describe("start", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("moves task from todo to in_progress", async () => {
@@ -450,18 +388,19 @@ describe("start", () => {
     await finalizeEpic(tempDir);
 
     const result = await dispatch(["start", "1-workflow-epic.1"], tempDir);
-    assertEquals(result.id, "1-workflow-epic.1");
-    assertEquals(result.title, "Test task");
-    assertEquals(result.assignee, "test-agent");
+    expect(result.id).toEqual("1-workflow-epic.1");
+    expect(result.title).toEqual("Test task");
+    expect(result.assignee).toEqual("test-agent");
 
     // Verify on disk
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-workflow-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.status, "in_progress");
-    assertEquals(task.assignee, "test-agent");
+    expect(task.status).toEqual("in_progress");
+    expect(task.assignee).toEqual("test-agent");
   });
 
   it("transitions epic from open to in_progress on first start", async () => {
@@ -471,22 +410,24 @@ describe("start", () => {
 
     // Verify epic is open before start
     let epic = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/1-workflow-epic/state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(epic.status, "open");
+    expect(epic.status).toEqual("open");
 
     // Start first task
     await dispatch(["start", "1-workflow-epic.1"], tempDir);
 
     // Verify epic transitioned to in_progress
     epic = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/1-workflow-epic/state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(epic.status, "in_progress");
+    expect(epic.status).toEqual("in_progress");
   });
 
   it("does not re-transition epic on subsequent starts", async () => {
@@ -499,36 +440,34 @@ describe("start", () => {
 
     // Record updatedAt
     let epic = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/1-workflow-epic/state.json`,
+        "utf-8",
       ),
     );
     const firstUpdate = epic.updatedAt;
-    assertEquals(epic.status, "in_progress");
+    expect(epic.status).toEqual("in_progress");
 
     // Complete first, start second — epic should stay in_progress
     await dispatch(["done", "1-workflow-epic.1"], tempDir);
     await dispatch(["start", "1-workflow-epic.2"], tempDir);
 
     epic = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/1-workflow-epic/state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(epic.status, "in_progress");
+    expect(epic.status).toEqual("in_progress");
     // updatedAt should NOT have changed again for the epic (it stays in_progress)
-    assertEquals(epic.updatedAt, firstUpdate);
+    expect(epic.updatedAt).toEqual(firstUpdate);
   });
 
   it("errors if epic is still in scaffolding", async () => {
     await createTestTask(tempDir);
     // Don't finalize — epic is still scaffolding
 
-    await assertRejects(
-      () => dispatch(["start", "1-workflow-epic.1"], tempDir),
-      Error,
-      "still in scaffolding state",
-    );
+    await expect(dispatch(["start", "1-workflow-epic.1"], tempDir)).rejects.toThrow("still in scaffolding state");
   });
 
   it("errors if task is already done", async () => {
@@ -538,11 +477,7 @@ describe("start", () => {
     await dispatch(["start", "1-workflow-epic.1"], tempDir);
     await dispatch(["done", "1-workflow-epic.1"], tempDir);
 
-    await assertRejects(
-      () => dispatch(["start", "1-workflow-epic.1"], tempDir),
-      Error,
-      "already done",
-    );
+    await expect(dispatch(["start", "1-workflow-epic.1"], tempDir)).rejects.toThrow("already done");
   });
 
   it("errors if task is already in_progress", async () => {
@@ -551,11 +486,7 @@ describe("start", () => {
 
     await dispatch(["start", "1-workflow-epic.1"], tempDir);
 
-    await assertRejects(
-      () => dispatch(["start", "1-workflow-epic.1"], tempDir),
-      Error,
-      "already in progress",
-    );
+    await expect(dispatch(["start", "1-workflow-epic.1"], tempDir)).rejects.toThrow("already in progress");
   });
 
   it("errors if task is blocked", async () => {
@@ -569,11 +500,7 @@ describe("start", () => {
       "waiting on API",
     ], tempDir);
 
-    await assertRejects(
-      () => dispatch(["start", "1-workflow-epic.1"], tempDir),
-      Error,
-      "is blocked",
-    );
+    await expect(dispatch(["start", "1-workflow-epic.1"], tempDir)).rejects.toThrow("is blocked");
   });
 
   it("errors if task is in code_review", async () => {
@@ -583,11 +510,7 @@ describe("start", () => {
     await dispatch(["start", "1-workflow-epic.1"], tempDir);
     await dispatch(["review", "1-workflow-epic.1"], tempDir);
 
-    await assertRejects(
-      () => dispatch(["start", "1-workflow-epic.1"], tempDir),
-      Error,
-      "in code review",
-    );
+    await expect(dispatch(["start", "1-workflow-epic.1"], tempDir)).rejects.toThrow("in code review");
   });
 
   it("errors if dependencies are not met", async () => {
@@ -596,11 +519,7 @@ describe("start", () => {
     await finalizeEpic(tempDir);
 
     // Task 1 is still todo, so task 2 should fail to start
-    await assertRejects(
-      () => dispatch(["start", "1-workflow-epic.2"], tempDir),
-      Error,
-      "unmet dependencies",
-    );
+    await expect(dispatch(["start", "1-workflow-epic.2"], tempDir)).rejects.toThrow("unmet dependencies");
   });
 });
 
@@ -609,7 +528,7 @@ describe("done", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
     await createTestEpic(tempDir, "Done Epic");
@@ -618,7 +537,7 @@ describe("done", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("moves task from in_progress to done", async () => {
@@ -627,15 +546,16 @@ describe("done", () => {
 
     await dispatch(["start", "1-done-epic.1"], tempDir);
     const result = await dispatch(["done", "1-done-epic.1"], tempDir);
-    assertEquals(result.id, "1-done-epic.1");
-    assertEquals(result.title, "Test task");
+    expect(result.id).toEqual("1-done-epic.1");
+    expect(result.title).toEqual("Test task");
 
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-done-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.status, "done");
+    expect(task.status).toEqual("done");
   });
 
   it("writes summary to task plan markdown", async () => {
@@ -653,8 +573,8 @@ describe("done", () => {
     // Verify via cat (reads from the task plan file)
     const cat = await dispatch(["cat", "1-done-epic.1"], tempDir);
     const content = cat.content as string;
-    assertStringIncludes(content, "## Done Summary");
-    assertStringIncludes(content, "Implemented OAuth");
+    expect(content).toContain("## Done Summary");
+    expect(content).toContain("Implemented OAuth");
   });
 
   it("writes evidence to both JSON and markdown", async () => {
@@ -669,29 +589,26 @@ describe("done", () => {
 
     // Verify JSON field
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-done-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.evidence, { commits: ["abc"] });
+    expect(task.evidence).toEqual({ commits: ["abc"] });
 
     // Verify markdown via cat
     const cat = await dispatch(["cat", "1-done-epic.1"], tempDir);
     const content = cat.content as string;
-    assertStringIncludes(content, "## Evidence");
-    assertStringIncludes(content, '"commits"');
-    assertStringIncludes(content, "```json");
+    expect(content).toContain("## Evidence");
+    expect(content).toContain('"commits"');
+    expect(content).toContain("```json");
   });
 
   it("errors if task is not in_progress", async () => {
     await createTestTask(tempDir);
     await finalizeEpic(tempDir);
 
-    await assertRejects(
-      () => dispatch(["done", "1-done-epic.1"], tempDir),
-      Error,
-      "not in progress",
-    );
+    await expect(dispatch(["done", "1-done-epic.1"], tempDir)).rejects.toThrow("not in progress");
   });
 
   it("errors if different actor tries to complete", async () => {
@@ -702,12 +619,8 @@ describe("done", () => {
     await dispatch(["start", "1-done-epic.1"], tempDir);
 
     // Switch actor to bob
-    Deno.env.set("AGENTQ_ACTOR", "bob");
-    await assertRejects(
-      () => dispatch(["done", "1-done-epic.1"], tempDir),
-      Error,
-      "assigned to test-agent, not bob",
-    );
+    process.env["AGENTQ_ACTOR"] = "bob";
+    await expect(dispatch(["done", "1-done-epic.1"], tempDir)).rejects.toThrow("assigned to test-agent, not bob");
   });
 
   it("errors on invalid evidence JSON", async () => {
@@ -716,15 +629,10 @@ describe("done", () => {
 
     await dispatch(["start", "1-done-epic.1"], tempDir);
 
-    await assertRejects(
-      () =>
-        dispatch(
+    await expect(dispatch(
           ["done", "1-done-epic.1", "--evidence", "not json"],
           tempDir,
-        ),
-      Error,
-      "Invalid evidence JSON",
-    );
+        )).rejects.toThrow("Invalid evidence JSON");
   });
 
   it("moves task from code_review to done", async () => {
@@ -745,15 +653,16 @@ describe("done", () => {
       ],
       tempDir,
     );
-    assertEquals(result.id, "1-done-epic.1");
+    expect(result.id).toEqual("1-done-epic.1");
 
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-done-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.status, "done");
-    assertEquals(task.evidence, { review: "PASS" });
+    expect(task.status).toEqual("done");
+    expect(task.evidence).toEqual({ review: "PASS" });
   });
 
   it("appends sections if not in markdown", async () => {
@@ -776,10 +685,10 @@ describe("done", () => {
 
     const cat = await dispatch(["cat", "1-done-epic.1"], tempDir);
     const content = cat.content as string;
-    assertStringIncludes(content, "## Done Summary");
-    assertStringIncludes(content, "All done");
-    assertStringIncludes(content, "## Evidence");
-    assertStringIncludes(content, '"test"');
+    expect(content).toContain("## Done Summary");
+    expect(content).toContain("All done");
+    expect(content).toContain("## Evidence");
+    expect(content).toContain('"test"');
   });
 
   it("auto-closes epic when last task is done", async () => {
@@ -791,21 +700,22 @@ describe("done", () => {
     // Complete task 1 — epic should stay in_progress
     await dispatch(["start", "1-done-epic.1"], tempDir);
     const result1 = await dispatch(["done", "1-done-epic.1"], tempDir);
-    assertEquals(result1.epicClosed, undefined);
+    expect(result1.epicClosed).toEqual(undefined);
 
     // Complete task 2 — epic should auto-close
     await dispatch(["start", "1-done-epic.2"], tempDir);
     const result2 = await dispatch(["done", "1-done-epic.2"], tempDir);
-    assertEquals(result2.epicClosed, true);
-    assertEquals(result2.epicId, "1-done-epic");
+    expect(result2.epicClosed).toEqual(true);
+    expect(result2.epicId).toEqual("1-done-epic");
 
     // Verify epic on disk
     const epic = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/1-done-epic/state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(epic.status, "done");
+    expect(epic.status).toEqual("done");
   });
 
   it("does not close epic when tasks remain undone", async () => {
@@ -817,15 +727,16 @@ describe("done", () => {
     const result = await dispatch(["done", "1-done-epic.1"], tempDir);
 
     // No epicClosed in response
-    assertEquals(result.epicClosed, undefined);
+    expect(result.epicClosed).toEqual(undefined);
 
     // Epic still in_progress (transitioned from open on first start)
     const epic = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/1-done-epic/state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(epic.status, "in_progress");
+    expect(epic.status).toEqual("in_progress");
   });
 
   it("auto-closes single-task epic", async () => {
@@ -834,15 +745,16 @@ describe("done", () => {
 
     await dispatch(["start", "1-done-epic.1"], tempDir);
     const result = await dispatch(["done", "1-done-epic.1"], tempDir);
-    assertEquals(result.epicClosed, true);
-    assertEquals(result.epicId, "1-done-epic");
+    expect(result.epicClosed).toEqual(true);
+    expect(result.epicId).toEqual("1-done-epic");
 
     const epic = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/epics/1-done-epic/state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(epic.status, "done");
+    expect(epic.status).toEqual("done");
   });
 });
 
@@ -851,7 +763,7 @@ describe("review", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
     await createTestEpic(tempDir, "Review Epic");
@@ -860,7 +772,7 @@ describe("review", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("moves task from in_progress to code_review", async () => {
@@ -870,15 +782,16 @@ describe("review", () => {
     await dispatch(["start", "1-review-epic.1"], tempDir);
 
     const result = await dispatch(["review", "1-review-epic.1"], tempDir);
-    assertEquals(result.id, "1-review-epic.1");
-    assertEquals(result.status, "code_review");
+    expect(result.id).toEqual("1-review-epic.1");
+    expect(result.status).toEqual("code_review");
 
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-review-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.status, "code_review");
+    expect(task.status).toEqual("code_review");
   });
 
   it("preserves assignee", async () => {
@@ -889,22 +802,19 @@ describe("review", () => {
     await dispatch(["review", "1-review-epic.1"], tempDir);
 
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-review-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.assignee, "test-agent");
+    expect(task.assignee).toEqual("test-agent");
   });
 
   it("errors if task is not in_progress", async () => {
     await createTestTask(tempDir);
     await finalizeEpic(tempDir);
 
-    await assertRejects(
-      () => dispatch(["review", "1-review-epic.1"], tempDir),
-      Error,
-      "not in progress",
-    );
+    await expect(dispatch(["review", "1-review-epic.1"], tempDir)).rejects.toThrow("not in progress");
   });
 
   it("errors if task is already code_review", async () => {
@@ -914,11 +824,7 @@ describe("review", () => {
     await dispatch(["start", "1-review-epic.1"], tempDir);
     await dispatch(["review", "1-review-epic.1"], tempDir);
 
-    await assertRejects(
-      () => dispatch(["review", "1-review-epic.1"], tempDir),
-      Error,
-      "not in progress",
-    );
+    await expect(dispatch(["review", "1-review-epic.1"], tempDir)).rejects.toThrow("not in progress");
   });
 
   it("errors if task is already done", async () => {
@@ -928,11 +834,7 @@ describe("review", () => {
     await dispatch(["start", "1-review-epic.1"], tempDir);
     await dispatch(["done", "1-review-epic.1"], tempDir);
 
-    await assertRejects(
-      () => dispatch(["review", "1-review-epic.1"], tempDir),
-      Error,
-      "not in progress",
-    );
+    await expect(dispatch(["review", "1-review-epic.1"], tempDir)).rejects.toThrow("not in progress");
   });
 
   it("errors if different actor tries to review", async () => {
@@ -941,12 +843,8 @@ describe("review", () => {
 
     await dispatch(["start", "1-review-epic.1"], tempDir);
 
-    Deno.env.set("AGENTQ_ACTOR", "bob");
-    await assertRejects(
-      () => dispatch(["review", "1-review-epic.1"], tempDir),
-      Error,
-      "assigned to test-agent, not bob",
-    );
+    process.env["AGENTQ_ACTOR"] = "bob";
+    await expect(dispatch(["review", "1-review-epic.1"], tempDir)).rejects.toThrow("assigned to test-agent, not bob");
   });
 });
 
@@ -955,7 +853,7 @@ describe("block", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
     await createTestEpic(tempDir, "Block Epic");
@@ -964,7 +862,7 @@ describe("block", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("blocks a todo task", async () => {
@@ -975,16 +873,17 @@ describe("block", () => {
       ["block", "1-block-epic.1", "--reason", "waiting on API key"],
       tempDir,
     );
-    assertEquals(result.id, "1-block-epic.1");
-    assertEquals(result.blockReason, "waiting on API key");
+    expect(result.id).toEqual("1-block-epic.1");
+    expect(result.blockReason).toEqual("waiting on API key");
 
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-block-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.status, "blocked");
-    assertEquals(task.blockReason, "waiting on API key");
+    expect(task.status).toEqual("blocked");
+    expect(task.blockReason).toEqual("waiting on API key");
   });
 
   it("blocks an in_progress task", async () => {
@@ -996,14 +895,15 @@ describe("block", () => {
       ["block", "1-block-epic.1", "--reason", "external dependency"],
       tempDir,
     );
-    assertEquals(result.blockReason, "external dependency");
+    expect(result.blockReason).toEqual("external dependency");
 
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-block-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.status, "blocked");
+    expect(task.status).toEqual("blocked");
   });
 
   it("blocks a code_review task", async () => {
@@ -1017,14 +917,15 @@ describe("block", () => {
       ["block", "1-block-epic.1", "--reason", "review found critical issue"],
       tempDir,
     );
-    assertEquals(result.blockReason, "review found critical issue");
+    expect(result.blockReason).toEqual("review found critical issue");
 
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-block-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.status, "blocked");
+    expect(task.status).toEqual("blocked");
   });
 
   it("errors if task is already done", async () => {
@@ -1034,15 +935,10 @@ describe("block", () => {
     await dispatch(["start", "1-block-epic.1"], tempDir);
     await dispatch(["done", "1-block-epic.1"], tempDir);
 
-    await assertRejects(
-      () =>
-        dispatch(
+    await expect(dispatch(
           ["block", "1-block-epic.1", "--reason", "too late"],
           tempDir,
-        ),
-      Error,
-      "already done",
-    );
+        )).rejects.toThrow("already done");
   });
 
   it("errors if task is already blocked", async () => {
@@ -1054,26 +950,17 @@ describe("block", () => {
       tempDir,
     );
 
-    await assertRejects(
-      () =>
-        dispatch(
+    await expect(dispatch(
           ["block", "1-block-epic.1", "--reason", "reason 2"],
           tempDir,
-        ),
-      Error,
-      "already blocked",
-    );
+        )).rejects.toThrow("already blocked");
   });
 
   it("errors without --reason", async () => {
     await createTestTask(tempDir);
     await finalizeEpic(tempDir);
 
-    await assertRejects(
-      () => dispatch(["block", "1-block-epic.1"], tempDir),
-      Error,
-      "--reason is required",
-    );
+    await expect(dispatch(["block", "1-block-epic.1"], tempDir)).rejects.toThrow("--reason is required");
   });
 
   it("errors if different actor tries to block assigned task", async () => {
@@ -1086,15 +973,10 @@ describe("block", () => {
     // Switch to a different actor
     const restoreOther = withActor("other-agent");
     try {
-      await assertRejects(
-        () =>
-          dispatch(
+      await expect(dispatch(
             ["block", "1-block-epic.1", "--reason", "stealing block"],
             tempDir,
-          ),
-        Error,
-        "assigned to test-agent, not other-agent",
-      );
+          )).rejects.toThrow("assigned to test-agent, not other-agent");
     } finally {
       restoreOther();
     }
@@ -1111,8 +993,8 @@ describe("block", () => {
         ["block", "1-block-epic.1", "--reason", "needs clarification"],
         tempDir,
       );
-      assertEquals(result.id, "1-block-epic.1");
-      assertEquals(result.blockReason, "needs clarification");
+      expect(result.id).toEqual("1-block-epic.1");
+      expect(result.blockReason).toEqual("needs clarification");
     } finally {
       restoreOther();
     }
@@ -1124,7 +1006,7 @@ describe("unblock", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
     await createTestEpic(tempDir, "Unblock Epic");
@@ -1133,7 +1015,7 @@ describe("unblock", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("unblocks to todo, clears assignee and blockReason", async () => {
@@ -1148,28 +1030,25 @@ describe("unblock", () => {
     );
 
     const result = await dispatch(["unblock", "1-unblock-epic.1"], tempDir);
-    assertEquals(result.id, "1-unblock-epic.1");
-    assertEquals(result.status, "todo");
+    expect(result.id).toEqual("1-unblock-epic.1");
+    expect(result.status).toEqual("todo");
 
     const task = JSON.parse(
-      await Deno.readTextFile(
+      await readFile(
         `${tempDir}/agentq/tasks/1-unblock-epic/1.state.json`,
+        "utf-8",
       ),
     );
-    assertEquals(task.status, "todo");
-    assertEquals(task.assignee, null);
-    assertEquals(task.blockReason, null);
+    expect(task.status).toEqual("todo");
+    expect(task.assignee).toEqual(null);
+    expect(task.blockReason).toEqual(null);
   });
 
   it("errors if task is not blocked", async () => {
     await createTestTask(tempDir);
     await finalizeEpic(tempDir);
 
-    await assertRejects(
-      () => dispatch(["unblock", "1-unblock-epic.1"], tempDir),
-      Error,
-      "not blocked",
-    );
+    await expect(dispatch(["unblock", "1-unblock-epic.1"], tempDir)).rejects.toThrow("not blocked");
   });
 });
 
@@ -1180,7 +1059,7 @@ describe("ready", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
     await createTestEpic(tempDir, "Ready Epic");
@@ -1189,7 +1068,7 @@ describe("ready", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("lists tasks with no deps and status todo", async () => {
@@ -1203,11 +1082,11 @@ describe("ready", () => {
       tempDir,
     );
     const tasks = result.tasks as { id: string; title: string }[];
-    assertEquals(tasks.length, 3);
-    assertEquals(tasks[0].id, "1-ready-epic.1");
-    assertEquals(tasks[0].title, "Test task");
-    assertEquals(tasks[1].id, "1-ready-epic.2");
-    assertEquals(tasks[2].id, "1-ready-epic.3");
+    expect(tasks.length).toEqual(3);
+    expect(tasks[0].id).toEqual("1-ready-epic.1");
+    expect(tasks[0].title).toEqual("Test task");
+    expect(tasks[1].id).toEqual("1-ready-epic.2");
+    expect(tasks[2].id).toEqual("1-ready-epic.3");
   });
 
   it("excludes tasks with unmet deps", async () => {
@@ -1220,8 +1099,8 @@ describe("ready", () => {
       tempDir,
     );
     const tasks = result.tasks as { id: string; title: string }[];
-    assertEquals(tasks.length, 1);
-    assertEquals(tasks[0].id, "1-ready-epic.1");
+    expect(tasks.length).toEqual(1);
+    expect(tasks[0].id).toEqual("1-ready-epic.1");
   });
 
   it("includes tasks whose deps are all done", async () => {
@@ -1238,8 +1117,8 @@ describe("ready", () => {
       tempDir,
     );
     const tasks = result.tasks as { id: string; title: string }[];
-    assertEquals(tasks.length, 1);
-    assertEquals(tasks[0].id, "1-ready-epic.2");
+    expect(tasks.length).toEqual(1);
+    expect(tasks[0].id).toEqual("1-ready-epic.2");
   });
 
   it("excludes blocked, in_progress, and done tasks", async () => {
@@ -1265,8 +1144,8 @@ describe("ready", () => {
       tempDir,
     );
     const tasks = result.tasks as { id: string; title: string }[];
-    assertEquals(tasks.length, 1);
-    assertEquals(tasks[0].id, "1-ready-epic.1");
+    expect(tasks.length).toEqual(1);
+    expect(tasks[0].id).toEqual("1-ready-epic.1");
   });
 
   it("returns empty array when no tasks are ready", async () => {
@@ -1285,7 +1164,7 @@ describe("ready", () => {
       tempDir,
     );
     const tasks = result.tasks as { id: string; title: string }[];
-    assertEquals(tasks.length, 0);
+    expect(tasks.length).toEqual(0);
   });
 });
 
@@ -1294,7 +1173,7 @@ describe("next", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
     await createTestEpic(tempDir, "Next Epic");
@@ -1303,7 +1182,7 @@ describe("next", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("returns own in_progress task first", async () => {
@@ -1318,11 +1197,11 @@ describe("next", () => {
       ["next", "--epic", "1-next-epic"],
       tempDir,
     );
-    assertEquals(result.status, "work");
-    assertEquals(result.epic, "1-next-epic");
-    assertEquals(result.task, "1-next-epic.1");
-    assertEquals(result.title, "Test task");
-    assertEquals(result.reason, "in_progress");
+    expect(result.status).toEqual("work");
+    expect(result.epic).toEqual("1-next-epic");
+    expect(result.task).toEqual("1-next-epic.1");
+    expect(result.title).toEqual("Test task");
+    expect(result.reason).toEqual("in_progress");
   });
 
   it("returns own code_review task first", async () => {
@@ -1338,10 +1217,10 @@ describe("next", () => {
       ["next", "--epic", "1-next-epic"],
       tempDir,
     );
-    assertEquals(result.status, "work");
-    assertEquals(result.task, "1-next-epic.1");
-    assertEquals(result.title, "Test task");
-    assertEquals(result.reason, "code_review");
+    expect(result.status).toEqual("work");
+    expect(result.task).toEqual("1-next-epic.1");
+    expect(result.title).toEqual("Test task");
+    expect(result.reason).toEqual("code_review");
   });
 
   it("skips others' code_review tasks", async () => {
@@ -1350,20 +1229,20 @@ describe("next", () => {
     await finalizeEpic(tempDir);
 
     // Start and review task 1 as alice
-    Deno.env.set("AGENTQ_ACTOR", "alice");
+    process.env["AGENTQ_ACTOR"] = "alice";
     await dispatch(["start", "1-next-epic.1"], tempDir);
     await dispatch(["review", "1-next-epic.1"], tempDir);
 
     // Query next as bob — should skip task 1, pick task 2
-    Deno.env.set("AGENTQ_ACTOR", "bob");
+    process.env["AGENTQ_ACTOR"] = "bob";
     const result = await dispatch(
       ["next", "--epic", "1-next-epic"],
       tempDir,
     );
-    assertEquals(result.status, "work");
-    assertEquals(result.task, "1-next-epic.2");
-    assertEquals(result.title, "Test task");
-    assertEquals(result.reason, "ready_task");
+    expect(result.status).toEqual("work");
+    expect(result.task).toEqual("1-next-epic.2");
+    expect(result.title).toEqual("Test task");
+    expect(result.reason).toEqual("ready_task");
   });
 
   it("returns lowest ready task when nothing in_progress", async () => {
@@ -1376,10 +1255,10 @@ describe("next", () => {
       ["next", "--epic", "1-next-epic"],
       tempDir,
     );
-    assertEquals(result.status, "work");
-    assertEquals(result.task, "1-next-epic.1");
-    assertEquals(result.title, "Test task");
-    assertEquals(result.reason, "ready_task");
+    expect(result.status).toEqual("work");
+    expect(result.task).toEqual("1-next-epic.1");
+    expect(result.title).toEqual("Test task");
+    expect(result.reason).toEqual("ready_task");
   });
 
   it("skips others' in_progress tasks", async () => {
@@ -1388,19 +1267,19 @@ describe("next", () => {
     await finalizeEpic(tempDir);
 
     // Start task 1 as "alice"
-    Deno.env.set("AGENTQ_ACTOR", "alice");
+    process.env["AGENTQ_ACTOR"] = "alice";
     await dispatch(["start", "1-next-epic.1"], tempDir);
 
     // Query next as "bob" — should skip task 1, pick task 2
-    Deno.env.set("AGENTQ_ACTOR", "bob");
+    process.env["AGENTQ_ACTOR"] = "bob";
     const result = await dispatch(
       ["next", "--epic", "1-next-epic"],
       tempDir,
     );
-    assertEquals(result.status, "work");
-    assertEquals(result.task, "1-next-epic.2");
-    assertEquals(result.title, "Test task");
-    assertEquals(result.reason, "ready_task");
+    expect(result.status).toEqual("work");
+    expect(result.task).toEqual("1-next-epic.2");
+    expect(result.title).toEqual("Test task");
+    expect(result.reason).toEqual("ready_task");
   });
 
   it("returns all_tasks_done when everything is done", async () => {
@@ -1418,10 +1297,10 @@ describe("next", () => {
       ["next", "--epic", "1-next-epic"],
       tempDir,
     );
-    assertEquals(result.status, "none");
-    assertEquals(result.epic, "1-next-epic");
-    assertEquals(result.task, null);
-    assertEquals(result.reason, "all_tasks_done");
+    expect(result.status).toEqual("none");
+    expect(result.epic).toEqual("1-next-epic");
+    expect(result.task).toEqual(null);
+    expect(result.reason).toEqual("all_tasks_done");
   });
 
   it("returns no_actionable_tasks when stuck", async () => {
@@ -1439,9 +1318,9 @@ describe("next", () => {
       ["next", "--epic", "1-next-epic"],
       tempDir,
     );
-    assertEquals(result.status, "none");
-    assertEquals(result.task, null);
-    assertEquals(result.reason, "no_actionable_tasks");
+    expect(result.status).toEqual("none");
+    expect(result.task).toEqual(null);
+    expect(result.reason).toEqual("no_actionable_tasks");
   });
 
   it("returns no_actionable_tasks for epic with no tasks", async () => {
@@ -1462,9 +1341,9 @@ describe("next", () => {
       ["next", "--epic", "1-next-epic"],
       tempDir,
     );
-    assertEquals(result.status, "none");
-    assertEquals(result.task, null);
-    assertEquals(result.reason, "no_actionable_tasks");
+    expect(result.status).toEqual("none");
+    expect(result.task).toEqual(null);
+    expect(result.reason).toEqual("no_actionable_tasks");
   });
 
   it("respects dependency chains", async () => {
@@ -1475,24 +1354,24 @@ describe("next", () => {
 
     // Next should pick task 1 (only ready task)
     let result = await dispatch(["next", "--epic", "1-next-epic"], tempDir);
-    assertEquals(result.task, "1-next-epic.1");
-    assertEquals(result.reason, "ready_task");
+    expect(result.task).toEqual("1-next-epic.1");
+    expect(result.reason).toEqual("ready_task");
 
     // Complete task 1 -> task 2 becomes ready
     await dispatch(["start", "1-next-epic.1"], tempDir);
     await dispatch(["done", "1-next-epic.1"], tempDir);
 
     result = await dispatch(["next", "--epic", "1-next-epic"], tempDir);
-    assertEquals(result.task, "1-next-epic.2");
-    assertEquals(result.reason, "ready_task");
+    expect(result.task).toEqual("1-next-epic.2");
+    expect(result.reason).toEqual("ready_task");
 
     // Complete task 2 -> task 3 becomes ready
     await dispatch(["start", "1-next-epic.2"], tempDir);
     await dispatch(["done", "1-next-epic.2"], tempDir);
 
     result = await dispatch(["next", "--epic", "1-next-epic"], tempDir);
-    assertEquals(result.task, "1-next-epic.3");
-    assertEquals(result.reason, "ready_task");
+    expect(result.task).toEqual("1-next-epic.3");
+    expect(result.reason).toEqual("ready_task");
   });
 });
 
@@ -1503,7 +1382,7 @@ describe("show", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
     await createTestEpic(tempDir, "Show Epic");
@@ -1512,16 +1391,16 @@ describe("show", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("shows epic details", async () => {
     const result = await dispatch(["show", "1-show-epic"], tempDir);
     const epic = result.epic as Record<string, unknown>;
-    assertEquals(epic.id, "1-show-epic");
-    assertEquals(epic.status, "scaffolding");
-    assertEquals(typeof epic.createdAt, "string");
-    assertEquals(typeof epic.updatedAt, "string");
+    expect(epic.id).toEqual("1-show-epic");
+    expect(epic.status).toEqual("scaffolding");
+    expect(typeof epic.createdAt).toEqual("string");
+    expect(typeof epic.updatedAt).toEqual("string");
   });
 
   it("shows task details", async () => {
@@ -1530,38 +1409,26 @@ describe("show", () => {
 
     const result = await dispatch(["show", "1-show-epic.1"], tempDir);
     const task = result.task as Record<string, unknown>;
-    assertEquals(task.id, "1-show-epic.1");
-    assertEquals(task.epic, "1-show-epic");
-    assertEquals(task.title, "Test task");
-    assertEquals(task.status, "todo");
-    assertEquals(task.assignee, null);
-    assertEquals(task.evidence, null);
-    assertEquals(task.blockReason, null);
-    assertEquals(task.dependsOn, []);
+    expect(task.id).toEqual("1-show-epic.1");
+    expect(task.epic).toEqual("1-show-epic");
+    expect(task.title).toEqual("Test task");
+    expect(task.status).toEqual("todo");
+    expect(task.assignee).toEqual(null);
+    expect(task.evidence).toEqual(null);
+    expect(task.blockReason).toEqual(null);
+    expect(task.dependsOn).toEqual([]);
   });
 
   it("errors on invalid ID format", async () => {
-    await assertRejects(
-      () => dispatch(["show", "not-an-id"], tempDir),
-      Error,
-      "Invalid ID format",
-    );
+    await expect(dispatch(["show", "not-an-id"], tempDir)).rejects.toThrow("Invalid ID format");
   });
 
   it("errors on nonexistent epic", async () => {
-    await assertRejects(
-      () => dispatch(["show", "99-nonexistent"], tempDir),
-      Error,
-      "Epic not found",
-    );
+    await expect(dispatch(["show", "99-nonexistent"], tempDir)).rejects.toThrow("Epic not found");
   });
 
   it("errors on nonexistent task", async () => {
-    await assertRejects(
-      () => dispatch(["show", "1-show-epic.99"], tempDir),
-      Error,
-      "Task not found",
-    );
+    await expect(dispatch(["show", "1-show-epic.99"], tempDir)).rejects.toThrow("Task not found");
   });
 });
 
@@ -1569,18 +1436,18 @@ describe("cat", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
     await createTestEpic(tempDir, "Cat Epic");
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("returns epic plan content", async () => {
     const result = await dispatch(["cat", "1-cat-epic"], tempDir);
-    assertStringIncludes(result.content as string, "# Plan: Cat Epic");
+    expect(result.content as string).toContain("# Plan: Cat Epic");
   });
 
   it("returns task plan markdown", async () => {
@@ -1588,24 +1455,16 @@ describe("cat", () => {
 
     const result = await dispatch(["cat", "1-cat-epic.1"], tempDir);
     const content = result.content as string;
-    assertStringIncludes(content, "## Description");
-    assertStringIncludes(content, "## Acceptance");
+    expect(content).toContain("## Description");
+    expect(content).toContain("## Acceptance");
   });
 
   it("errors on nonexistent epic", async () => {
-    await assertRejects(
-      () => dispatch(["cat", "99-nonexistent"], tempDir),
-      Error,
-      "Epic not found",
-    );
+    await expect(dispatch(["cat", "99-nonexistent"], tempDir)).rejects.toThrow("Epic not found");
   });
 
   it("errors on invalid ID format", async () => {
-    await assertRejects(
-      () => dispatch(["cat", "not-an-id"], tempDir),
-      Error,
-      "Invalid ID format",
-    );
+    await expect(dispatch(["cat", "not-an-id"], tempDir)).rejects.toThrow("Invalid ID format");
   });
 });
 
@@ -1614,7 +1473,7 @@ describe("list", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
   });
@@ -1622,7 +1481,7 @@ describe("list", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("returns all epics with their tasks", async () => {
@@ -1638,24 +1497,24 @@ describe("list", () => {
 
     const result = await dispatch(["list"], tempDir);
     const epics = result.epics as Array<Record<string, unknown>>;
-    assertEquals(epics.length, 2);
-    assertEquals(epics[0].id, "1-epic-one");
-    assertEquals(epics[1].id, "2-epic-two");
+    expect(epics.length).toEqual(2);
+    expect(epics[0].id).toEqual("1-epic-one");
+    expect(epics[1].id).toEqual("2-epic-two");
 
     const tasks1 = epics[0].tasks as Array<Record<string, unknown>>;
-    assertEquals(tasks1.length, 2);
-    assertEquals(tasks1[0].id, "1-epic-one.1");
-    assertEquals(tasks1[1].id, "1-epic-one.2");
+    expect(tasks1.length).toEqual(2);
+    expect(tasks1[0].id).toEqual("1-epic-one.1");
+    expect(tasks1[1].id).toEqual("1-epic-one.2");
 
     const tasks2 = epics[1].tasks as Array<Record<string, unknown>>;
-    assertEquals(tasks2.length, 1);
-    assertEquals(tasks2[0].id, "2-epic-two.1");
+    expect(tasks2.length).toEqual(1);
+    expect(tasks2[0].id).toEqual("2-epic-two.1");
   });
 
   it("returns empty array when no epics exist", async () => {
     const result = await dispatch(["list"], tempDir);
     const epics = result.epics as Array<Record<string, unknown>>;
-    assertEquals(epics.length, 0);
+    expect(epics.length).toEqual(0);
   });
 
   it("includes task summary fields", async () => {
@@ -1670,13 +1529,13 @@ describe("list", () => {
     const tasks = epics[0].tasks as Array<Record<string, unknown>>;
     const task = tasks[0];
 
-    assertEquals(task.id, "1-field-epic.1");
-    assertEquals(task.title, "Test task");
-    assertEquals(task.status, "in_progress");
-    assertEquals(task.assignee, "test-agent");
+    expect(task.id).toEqual("1-field-epic.1");
+    expect(task.title).toEqual("Test task");
+    expect(task.status).toEqual("in_progress");
+    expect(task.assignee).toEqual("test-agent");
     // Should NOT include full task fields like evidence, blockReason, etc.
-    assertEquals("evidence" in task, false);
-    assertEquals("blockReason" in task, false);
+    expect("evidence" in task).toEqual(false);
+    expect("blockReason" in task).toEqual(false);
   });
 });
 
@@ -1685,7 +1544,7 @@ describe("tasks", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
     await createTestEpic(tempDir, "Tasks Epic");
@@ -1694,7 +1553,7 @@ describe("tasks", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("lists all tasks for an epic", async () => {
@@ -1708,10 +1567,10 @@ describe("tasks", () => {
       tempDir,
     );
     const tasks = result.tasks as Array<Record<string, unknown>>;
-    assertEquals(tasks.length, 3);
-    assertEquals(tasks[0].id, "1-tasks-epic.1");
-    assertEquals(tasks[1].id, "1-tasks-epic.2");
-    assertEquals(tasks[2].id, "1-tasks-epic.3");
+    expect(tasks.length).toEqual(3);
+    expect(tasks[0].id).toEqual("1-tasks-epic.1");
+    expect(tasks[1].id).toEqual("1-tasks-epic.2");
+    expect(tasks[2].id).toEqual("1-tasks-epic.3");
   });
 
   it("filters by status", async () => {
@@ -1728,9 +1587,9 @@ describe("tasks", () => {
       tempDir,
     );
     const tasks = result.tasks as Array<Record<string, unknown>>;
-    assertEquals(tasks.length, 1);
-    assertEquals(tasks[0].id, "1-tasks-epic.2");
-    assertEquals(tasks[0].status, "in_progress");
+    expect(tasks.length).toEqual(1);
+    expect(tasks[0].id).toEqual("1-tasks-epic.2");
+    expect(tasks[0].status).toEqual("in_progress");
   });
 
   it("filters by code_review status", async () => {
@@ -1746,9 +1605,9 @@ describe("tasks", () => {
       tempDir,
     );
     const tasks = result.tasks as Array<Record<string, unknown>>;
-    assertEquals(tasks.length, 1);
-    assertEquals(tasks[0].id, "1-tasks-epic.1");
-    assertEquals(tasks[0].status, "code_review");
+    expect(tasks.length).toEqual(1);
+    expect(tasks[0].id).toEqual("1-tasks-epic.1");
+    expect(tasks[0].status).toEqual("code_review");
   });
 
   it("returns empty array when no tasks match filter", async () => {
@@ -1760,27 +1619,18 @@ describe("tasks", () => {
       tempDir,
     );
     const tasks = result.tasks as Array<Record<string, unknown>>;
-    assertEquals(tasks.length, 0);
+    expect(tasks.length).toEqual(0);
   });
 
   it("errors on invalid status filter", async () => {
-    await assertRejects(
-      () =>
-        dispatch(
+    await expect(dispatch(
           ["tasks", "--epic", "1-tasks-epic", "--status", "invalid"],
           tempDir,
-        ),
-      Error,
-      "Invalid status",
-    );
+        )).rejects.toThrow("Invalid status");
   });
 
   it("errors on nonexistent epic", async () => {
-    await assertRejects(
-      () => dispatch(["tasks", "--epic", "99-nonexistent"], tempDir),
-      Error,
-      "Epic not found",
-    );
+    await expect(dispatch(["tasks", "--epic", "99-nonexistent"], tempDir)).rejects.toThrow("Epic not found");
   });
 
   it("includes dependsOn and title in task output", async () => {
@@ -1793,10 +1643,10 @@ describe("tasks", () => {
       tempDir,
     );
     const tasks = result.tasks as Array<Record<string, unknown>>;
-    assertEquals(tasks[0].dependsOn, []);
-    assertEquals(tasks[0].title, "Test task");
-    assertEquals(tasks[1].dependsOn, [1]);
-    assertEquals(tasks[1].title, "Test task");
+    expect(tasks[0].dependsOn).toEqual([]);
+    expect(tasks[0].title).toEqual("Test task");
+    expect(tasks[1].dependsOn).toEqual([1]);
+    expect(tasks[1].title).toEqual("Test task");
   });
 });
 
@@ -1807,11 +1657,11 @@ describe("formatLogEntry", () => {
       ["epic", "create", "--title", "Test", "--file", "/tmp/plan.md"],
       { success: true, id: "1-test" },
     );
-    assertStringIncludes(entry, "### 2026-03-03T12:00:00.000Z");
-    assertStringIncludes(entry, "epic create --title Test --file /tmp/plan.md");
-    assertStringIncludes(entry, "```json");
-    assertStringIncludes(entry, '"success": true');
-    assertStringIncludes(entry, '"id": "1-test"');
+    expect(entry).toContain("### 2026-03-03T12:00:00.000Z");
+    expect(entry).toContain("epic create --title Test --file /tmp/plan.md");
+    expect(entry).toContain("```json");
+    expect(entry).toContain('"success": true');
+    expect(entry).toContain('"id": "1-test"');
   });
 
   it("quotes args containing spaces", () => {
@@ -1820,7 +1670,7 @@ describe("formatLogEntry", () => {
       ["epic", "create", "--title", "A task with spaces"],
       { success: true },
     );
-    assertStringIncludes(entry, '"A task with spaces"');
+    expect(entry).toContain('"A task with spaces"');
   });
 
   it("formats error results", () => {
@@ -1829,8 +1679,8 @@ describe("formatLogEntry", () => {
       ["start", "1-foo.99"],
       { success: false, error: "Task not found: 1-foo.99" },
     );
-    assertStringIncludes(entry, '"success": false');
-    assertStringIncludes(entry, "Task not found");
+    expect(entry).toContain('"success": false');
+    expect(entry).toContain("Task not found");
   });
 });
 
@@ -1838,20 +1688,20 @@ describe("appendLogEntry", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("writes to global.md for epic-less commands", async () => {
     const store = new AgentqStore(tempDir);
     await appendLogEntry(store, ["list"], { success: true, epics: [] });
-    const content = await Deno.readTextFile(`${tempDir}/agentq/logs/global.md`);
-    assertStringIncludes(content, "list");
-    assertStringIncludes(content, '"success": true');
+    const content = await readFile(`${tempDir}/agentq/logs/global.md`, "utf-8");
+    expect(content).toContain("list");
+    expect(content).toContain('"success": true');
   });
 
   it("writes to epic log file for epic-scoped commands", async () => {
@@ -1869,15 +1719,16 @@ describe("appendLogEntry", () => {
 
     // Find the epic log file
     const files = [];
-    for await (const entry of Deno.readDir(`${tempDir}/agentq/logs`)) {
+    for (const entry of await readdir(`${tempDir}/agentq/logs`, { withFileTypes: true })) {
       if (entry.name.endsWith(`${epicId}.md`)) files.push(entry.name);
     }
-    assertEquals(files.length, 1);
+    expect(files.length).toEqual(1);
 
-    const content = await Deno.readTextFile(
+    const content = await readFile(
       `${tempDir}/agentq/logs/${files[0]}`,
+      "utf-8",
     );
-    assertStringIncludes(content, `ready --epic ${epicId}`);
+    expect(content).toContain(`ready --epic ${epicId}`);
   });
 
   it("appends to existing log file", async () => {
@@ -1888,11 +1739,11 @@ describe("appendLogEntry", () => {
       epics: [{ id: "1-x" }],
     });
 
-    const content = await Deno.readTextFile(`${tempDir}/agentq/logs/global.md`);
+    const content = await readFile(`${tempDir}/agentq/logs/global.md`, "utf-8");
     const headings = content.split("\n").filter((l: string) =>
       l.startsWith("### ")
     );
-    assertEquals(headings.length, 2);
+    expect(headings.length).toEqual(2);
   });
 
   it("falls back to global log when epic does not exist", async () => {
@@ -1903,8 +1754,8 @@ describe("appendLogEntry", () => {
       { success: false, error: "Epic not found" },
       "999-nonexistent",
     );
-    const content = await Deno.readTextFile(`${tempDir}/agentq/logs/global.md`);
-    assertStringIncludes(content, "show 999-nonexistent");
+    const content = await readFile(`${tempDir}/agentq/logs/global.md`, "utf-8");
+    expect(content).toContain("show 999-nonexistent");
   });
 });
 
@@ -1912,44 +1763,28 @@ describe("dispatch error paths", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("rejects unknown command", async () => {
-    await assertRejects(
-      () => dispatch(["foobar"], tempDir),
-      Error,
-      "Unknown command: foobar",
-    );
+    await expect(dispatch(["foobar"], tempDir)).rejects.toThrow("Unknown command: foobar");
   });
 
   it("rejects empty args", async () => {
-    await assertRejects(
-      () => dispatch([], tempDir),
-      Error,
-      "Unknown command: undefined",
-    );
+    await expect(dispatch([], tempDir)).rejects.toThrow("Unknown command: undefined");
   });
 
   it("rejects unknown epic subcommand", async () => {
-    await assertRejects(
-      () => dispatch(["epic", "foobar"], tempDir),
-      Error,
-      "Unknown epic subcommand: foobar",
-    );
+    await expect(dispatch(["epic", "foobar"], tempDir)).rejects.toThrow("Unknown epic subcommand: foobar");
   });
 
   it("rejects unknown task subcommand", async () => {
-    await assertRejects(
-      () => dispatch(["task", "foobar"], tempDir),
-      Error,
-      "Unknown task subcommand: foobar",
-    );
+    await expect(dispatch(["task", "foobar"], tempDir)).rejects.toThrow("Unknown task subcommand: foobar");
   });
 });
 
@@ -1957,12 +1792,12 @@ describe("command arg validation", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("task set-deps rejects missing --deps", async () => {
@@ -1971,11 +1806,7 @@ describe("command arg validation", () => {
     await createTestTask(tempDir);
     await finalizeEpic(tempDir);
 
-    await assertRejects(
-      () => dispatch(["task", "set-deps", "1-deps-test.1"], tempDir),
-      Error,
-      "--deps is required",
-    );
+    await expect(dispatch(["task", "set-deps", "1-deps-test.1"], tempDir)).rejects.toThrow("--deps is required");
   });
 });
 
@@ -1984,7 +1815,7 @@ describe("output shape", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
     restoreActor = withActor("test-agent");
   });
@@ -1992,12 +1823,12 @@ describe("output shape", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("does not leak internal _epic field in command outputs", async () => {
     const planFile = `${tempDir}/_tmp.md`;
-    await Deno.writeTextFile(planFile, "# Plan\n");
+    await writeFile(planFile, "# Plan\n");
     const epic = await dispatch(
       ["epic", "create", "--title", "Output Shape", "--file", planFile],
       tempDir,
@@ -2005,7 +1836,7 @@ describe("output shape", () => {
     const epicId = epic.id as string;
 
     const taskFile = `${tempDir}/_tmp_task.md`;
-    await Deno.writeTextFile(taskFile, "## Task\n");
+    await writeFile(taskFile, "## Task\n");
     const task = await dispatch(
       ["task", "create", "--title", "Test", "--file", taskFile],
       tempDir,
@@ -2024,10 +1855,7 @@ describe("output shape", () => {
     ];
 
     for (const response of responses) {
-      assertEquals(
-        Object.prototype.hasOwnProperty.call(response, "_epic"),
-        false,
-      );
+      expect(Object.prototype.hasOwnProperty.call(response, "_epic")).toEqual(false);
     }
   });
 });
@@ -2036,49 +1864,39 @@ describe("loadMeta corruption", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("rejects corrupt meta.json", async () => {
     // Write invalid JSON to meta.json
-    await Deno.writeTextFile(
+    await writeFile(
       `${tempDir}/agentq/meta.json`,
       "{not valid json!!!",
     );
 
     const planFile = `${tempDir}/_tmp.md`;
-    await Deno.writeTextFile(planFile, "# Plan\n");
-    await assertRejects(
-      () =>
-        dispatch(
+    await writeFile(planFile, "# Plan\n");
+    await expect(dispatch(
           ["epic", "create", "--title", "Anything", "--file", planFile],
           tempDir,
-        ),
-      Error,
-      "meta.json not found or corrupt",
-    );
+        )).rejects.toThrow("meta.json not found or corrupt");
   });
 
   it("rejects missing meta.json", async () => {
     // Delete meta.json
-    await Deno.remove(`${tempDir}/agentq/meta.json`);
+    await rm(`${tempDir}/agentq/meta.json`, { recursive: true });
 
     const planFile = `${tempDir}/_tmp.md`;
-    await Deno.writeTextFile(planFile, "# Plan\n");
-    await assertRejects(
-      () =>
-        dispatch(
+    await writeFile(planFile, "# Plan\n");
+    await expect(dispatch(
           ["epic", "create", "--title", "Anything", "--file", planFile],
           tempDir,
-        ),
-      Error,
-      "meta.json not found or corrupt",
-    );
+        )).rejects.toThrow("meta.json not found or corrupt");
   });
 });
 
@@ -2087,7 +1905,7 @@ describe("task set-deps clearing", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
   });
@@ -2095,7 +1913,7 @@ describe("task set-deps clearing", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("clears deps with empty string", async () => {
@@ -2109,7 +1927,7 @@ describe("task set-deps clearing", () => {
     // Verify T2 has the dependency
     const before = await dispatch(["show", "1-clear-deps.2"], tempDir);
     const taskBefore = before.task as Record<string, unknown>;
-    assertEquals(taskBefore.dependsOn, [1]);
+    expect(taskBefore.dependsOn).toEqual([1]);
 
     // Clear deps with empty string
     await dispatch(["task", "set-deps", "1-clear-deps.2", "--deps", ""], tempDir);
@@ -2117,7 +1935,7 @@ describe("task set-deps clearing", () => {
     // Verify deps are now empty
     const after = await dispatch(["show", "1-clear-deps.2"], tempDir);
     const taskAfter = after.task as Record<string, unknown>;
-    assertEquals(taskAfter.dependsOn, []);
+    expect(taskAfter.dependsOn).toEqual([]);
   });
 });
 
@@ -2126,7 +1944,7 @@ describe("block preserves assignee", () => {
   let restoreActor: (() => void) | null = null;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     restoreActor = withActor("test-agent");
     await setupState(tempDir);
   });
@@ -2134,7 +1952,7 @@ describe("block preserves assignee", () => {
   afterEach(async () => {
     if (restoreActor) restoreActor();
     restoreActor = null;
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("preserves assignee when blocking in_progress task", async () => {
@@ -2157,9 +1975,9 @@ describe("block preserves assignee", () => {
     // Verify the blocked task still has the original assignee
     const result = await dispatch(["show", "1-block-assign.1"], tempDir);
     const task = result.task as Record<string, unknown>;
-    assertEquals(task.status, "blocked");
-    assertEquals(task.assignee, "test-agent");
-    assertEquals(task.blockReason, "waiting on external API");
+    expect(task.status).toEqual("blocked");
+    expect(task.assignee).toEqual("test-agent");
+    expect(task.blockReason).toEqual("waiting on external API");
   });
 });
 
@@ -2167,47 +1985,35 @@ describe("corrupt state handling", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("loadEpic reports corrupt JSON, not 'not found'", async () => {
     const epicDir = `${tempDir}/agentq/epics/1-broken`;
-    await Deno.mkdir(epicDir, { recursive: true });
-    await Deno.writeTextFile(`${epicDir}/state.json`, "{invalid json");
+    await mkdir(epicDir, { recursive: true });
+    await writeFile(`${epicDir}/state.json`, "{invalid json");
 
     const store = new AgentqStore(tempDir);
-    await assertRejects(
-      () => store.loadEpic("1-broken"),
-      Error,
-      "corrupt",
-    );
+    await expect(store.loadEpic("1-broken")).rejects.toThrow("corrupt");
   });
 
   it("loadTask reports corrupt JSON, not 'not found'", async () => {
     const taskDir = `${tempDir}/agentq/tasks/1-broken`;
-    await Deno.mkdir(taskDir, { recursive: true });
-    await Deno.writeTextFile(`${taskDir}/1.state.json`, "{bad");
+    await mkdir(taskDir, { recursive: true });
+    await writeFile(`${taskDir}/1.state.json`, "{bad");
 
     const store = new AgentqStore(tempDir);
-    await assertRejects(
-      () => store.loadTask("1-broken.1"),
-      Error,
-      "corrupt",
-    );
+    await expect(store.loadTask("1-broken.1")).rejects.toThrow("corrupt");
   });
 
   it("loadEpic still reports 'not found' for missing files", async () => {
     const store = new AgentqStore(tempDir);
-    await assertRejects(
-      () => store.loadEpic("99-nonexistent"),
-      Error,
-      "not found",
-    );
+    await expect(store.loadEpic("99-nonexistent")).rejects.toThrow("not found");
   });
 });
 
@@ -2215,19 +2021,19 @@ describe("backward compat: task without title field", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
   });
 
   afterEach(async () => {
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("loadTask defaults missing title to '(untitled)'", async () => {
     // Write a task state.json that lacks the title field (pre-title schema)
     const taskDir = `${tempDir}/agentq/tasks/1-old-epic`;
-    await Deno.mkdir(taskDir, { recursive: true });
-    await Deno.writeTextFile(
+    await mkdir(taskDir, { recursive: true });
+    await writeFile(
       `${taskDir}/1.state.json`,
       JSON.stringify({
         id: "1-old-epic.1",
@@ -2244,13 +2050,13 @@ describe("backward compat: task without title field", () => {
 
     const store = new AgentqStore(tempDir);
     const task = await store.loadTask("1-old-epic.1");
-    assertEquals(task.title, "(untitled)");
+    expect(task.title).toEqual("(untitled)");
   });
 
   it("loadAllTasks defaults missing title to '(untitled)'", async () => {
     const taskDir = `${tempDir}/agentq/tasks/1-old-epic`;
-    await Deno.mkdir(taskDir, { recursive: true });
-    await Deno.writeTextFile(
+    await mkdir(taskDir, { recursive: true });
+    await writeFile(
       `${taskDir}/1.state.json`,
       JSON.stringify({
         id: "1-old-epic.1",
@@ -2267,15 +2073,15 @@ describe("backward compat: task without title field", () => {
 
     const store = new AgentqStore(tempDir);
     const tasks = await store.loadAllTasks("1-old-epic");
-    assertEquals(tasks.length, 1);
-    assertEquals(tasks[0].title, "(untitled)");
+    expect(tasks.length).toEqual(1);
+    expect(tasks[0].title).toEqual("(untitled)");
   });
 
   it("loadTask defaults non-string title to '(untitled)'", async () => {
     // Corrupted file with title as array — truthy but not a string
     const taskDir = `${tempDir}/agentq/tasks/1-old-epic`;
-    await Deno.mkdir(taskDir, { recursive: true });
-    await Deno.writeTextFile(
+    await mkdir(taskDir, { recursive: true });
+    await writeFile(
       `${taskDir}/1.state.json`,
       JSON.stringify({
         id: "1-old-epic.1",
@@ -2293,7 +2099,7 @@ describe("backward compat: task without title field", () => {
 
     const store = new AgentqStore(tempDir);
     const task = await store.loadTask("1-old-epic.1");
-    assertEquals(task.title, "(untitled)");
+    expect(task.title).toEqual("(untitled)");
   });
 });
 
@@ -2302,7 +2108,7 @@ describe("task set-deps on done task", () => {
   let restoreActor: () => void;
 
   beforeEach(async () => {
-    tempDir = await Deno.makeTempDir();
+    tempDir = await mkdtemp(join(tmpdir(), "agentq-"));
     await setupState(tempDir);
     restoreActor = withActor("test-agent");
     await createTestEpic(tempDir, "Done Guard");
@@ -2316,18 +2122,13 @@ describe("task set-deps on done task", () => {
 
   afterEach(async () => {
     restoreActor();
-    await Deno.remove(tempDir, { recursive: true });
+    await rm(tempDir, { recursive: true });
   });
 
   it("rejects set-deps on a completed task", async () => {
-    await assertRejects(
-      () =>
-        dispatch(
+    await expect(dispatch(
           ["task", "set-deps", "1-done-guard.1", "--deps", "2"],
           tempDir,
-        ),
-      Error,
-      "Cannot modify deps of a completed task",
-    );
+        )).rejects.toThrow("Cannot modify deps of a completed task");
   });
 });

@@ -13,7 +13,7 @@ if (import.meta.main) {
   let epicId: string | null = null;
 
   try {
-    const execution = await runCommand(Deno.args);
+    const execution = await runCommand(process.argv.slice(2));
     output = { success: true, ...execution.output };
     epicId = execution.epicId ?? null;
     success = true;
@@ -24,10 +24,10 @@ if (import.meta.main) {
   console.log(JSON.stringify(output));
 
   try {
-    await appendLogEntry(store, Deno.args, output, epicId);
+    await appendLogEntry(store, process.argv.slice(2), output, epicId);
   } catch {
     // Silently skip logging errors (e.g., logs dir doesn't exist)
   }
 
-  if (!success) Deno.exit(1);
+  if (!success) process.exit(1);
 }

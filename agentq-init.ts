@@ -1,6 +1,8 @@
 // agentq-init.ts — Bootstrapper that sets up a project to use agent-q.
 // Installs the local agentqctl CLI, creates agentq/ state, and copies skills.
 
+import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+
 /**
  * Core bootstrapper logic. Sets up a project directory for agent-q use.
  * @param sourceDir - Directory containing agentqctl.ts and skills/ (typically the agent-q repo root)
@@ -14,26 +16,27 @@ export async function runInit(
     source: string,
     destination: string,
   ): Promise<void> {
-    await Deno.mkdir(destination, { recursive: true });
+    await mkdir(destination, { recursive: true });
 
-    for await (const entry of Deno.readDir(source)) {
+    const entries = await readdir(source, { withFileTypes: true });
+    for (const entry of entries) {
       const sourcePath = `${source}/${entry.name}`;
       const destinationPath = `${destination}/${entry.name}`;
 
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         await copyDirectoryRecursive(sourcePath, destinationPath);
         continue;
       }
 
-      if (entry.isSymlink) {
+      if (entry.isSymbolicLink()) {
         throw new Error(
           `Symlinks are not supported in runtime modules: ${sourcePath}`,
         );
       }
 
-      if (entry.isFile) {
-        const content = await Deno.readFile(sourcePath);
-        await Deno.writeFile(destinationPath, content);
+      if (entry.isFile()) {
+        const content = await readFile(sourcePath);
+        await writeFile(destinationPath, content);
       }
     }
   }
@@ -44,35 +47,29 @@ export async function runInit(
   const sourceAgentqctlModules = `${sourceDir}/agentqctl_lib`;
   const sourceSkillsDir = `${sourceDir}/skills`;
 
-  // Read version from source deno.json (single source of truth)
-  const sourceDenoJson = JSON.parse(
-    await Deno.readTextFile(`${sourceDir}/deno.json`),
+  // Read version from source package.json (single source of truth)
+  const sourcePackageJson = JSON.parse(
+    await readFile(`${sourceDir}/package.json`, "utf-8"),
   );
-  const version: string | undefined = sourceDenoJson.version;
+  const version: string | undefined = sourcePackageJson.version;
 
   // ── 2. Create state directories (idempotent) ───────────────────────────
 
   const base = `${targetDir}/agentq`;
 
   // Create subdirectories (idempotent via recursive: true)
-  // Plans now live inside epic/task directories, no separate plans/ dir needed
   for (const sub of ["epics", "tasks", "logs"]) {
-    await Deno.mkdir(`${base}/${sub}`, { recursive: true });
+    await mkdir(`${base}/${sub}`, { recursive: true });
   }
 
   // Write or update meta.json.
-  // On first init: create with nextId=1. On re-init: preserve existing fields.
-  // Always stamps initVersion so consuming projects know which version was installed.
-  // Known limitation: nextId uses read-modify-write without file locking.
-  // Concurrent agentq-init or next-id calls could allocate duplicate IDs.
-  // Acceptable for single-agent CLI usage.
   let stateStatus: "created" | "exists" = "exists";
   const metaPath = `${base}/meta.json`;
   let meta: Record<string, unknown>;
   try {
-    meta = JSON.parse(await Deno.readTextFile(metaPath));
+    meta = JSON.parse(await readFile(metaPath, "utf-8"));
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
       meta = { nextId: 1 };
       stateStatus = "created";
     } else {
@@ -82,27 +79,24 @@ export async function runInit(
   if (version) {
     meta.initVersion = version;
   }
-  await Deno.writeTextFile(
+  await writeFile(
     metaPath,
     JSON.stringify(meta, null, 2) + "\n",
   );
 
   // Write .gitkeep files (idempotent — overwrite is fine, they're empty)
   for (const sub of ["epics", "tasks", "logs"]) {
-    await Deno.writeTextFile(`${base}/${sub}/.gitkeep`, "");
+    await writeFile(`${base}/${sub}/.gitkeep`, "");
   }
 
   // ── 3. Copy/generate tool files (always overwrite) ────────────────────
 
-  // Copy agentqctl.ts → agentq/agentqctl.ts
-  // Note: if agentq-init is installed globally but separated from its source tree,
-  // this readTextFile will throw. That scenario is handled by the top-level catch.
-  const agentqctlSource = await Deno.readTextFile(sourceAgentqctl);
-  await Deno.writeTextFile(`${base}/agentqctl.ts`, agentqctlSource);
+  const agentqctlSource = await readFile(sourceAgentqctl, "utf-8");
+  await writeFile(`${base}/agentqctl.ts`, agentqctlSource);
 
   // Copy modular agentqctl runtime sources (required by agentqctl.ts imports)
   try {
-    await Deno.stat(sourceAgentqctlModules);
+    await stat(sourceAgentqctlModules);
   } catch {
     throw new Error(
       `Runtime modules directory not found: ${sourceAgentqctlModules}`,
@@ -110,36 +104,35 @@ export async function runInit(
   }
   await copyDirectoryRecursive(sourceAgentqctlModules, `${base}/agentqctl_lib`);
 
-  // Generate agentq/deno.json with runtime-only import map (no test deps)
-  const localDenoJson = {
-    imports: {
-      "@std/cli": "jsr:@std/cli@^1",
+  // Generate agentq/package.json with runtime-only dependencies
+  const localPackageJson = {
+    dependencies: {
+      "minimist": "^1.2.8",
     },
   };
-  await Deno.writeTextFile(
-    `${base}/deno.json`,
-    JSON.stringify(localDenoJson, null, 2) + "\n",
+  await writeFile(
+    `${base}/package.json`,
+    JSON.stringify(localPackageJson, null, 2) + "\n",
   );
 
   // Generate agentq/agentqctl shell wrapper
   const wrapperContent = `#!/bin/sh
 # Generated by agentq-init — do not edit
-exec deno run --allow-read --allow-write --allow-env=AGENTQ_ACTOR --allow-run=git --config "$(dirname "$0")/deno.json" "$(dirname "$0")/agentqctl.ts" "$@"
+exec bun run "$(dirname "$0")/agentqctl.ts" "$@"
 `;
-  await Deno.writeTextFile(`${base}/agentqctl`, wrapperContent);
+  await writeFile(`${base}/agentqctl`, wrapperContent);
   // Make wrapper executable (mode 0o755)
-  await Deno.chmod(`${base}/agentqctl`, 0o755);
+  await chmod(`${base}/agentqctl`, 0o755);
 
   // ── 4. Copy skills (always overwrite) ─────────────────────────────────
 
   const skills: Record<string, string> = {};
 
-  // Check if skills/ directory exists — skip silently if not (e.g., stripped distribution)
   let skillsDirExists = true;
   try {
-    await Deno.stat(sourceSkillsDir);
+    await stat(sourceSkillsDir);
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
       skillsDirExists = false;
     } else {
       throw e;
@@ -147,21 +140,18 @@ exec deno run --allow-read --allow-write --allow-env=AGENTQ_ACTOR --allow-run=gi
   }
 
   if (skillsDirExists) {
-    // Scan source skills/ for directories starting with aq-
-    // Per-file errors (e.g., missing SKILL.md) propagate intentionally
-    for await (const entry of Deno.readDir(sourceSkillsDir)) {
-      if (!entry.isDirectory || !entry.name.startsWith("aq-")) continue;
+    const entries = await readdir(sourceSkillsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith("aq-")) continue;
 
       const srcFile = `${sourceSkillsDir}/${entry.name}/SKILL.md`;
       const dstDir = `${targetDir}/.claude/skills/${entry.name}`;
       const dstFile = `${dstDir}/SKILL.md`;
 
-      // Read source SKILL.md (throws if missing — a skill dir without SKILL.md is a bug)
-      const content = await Deno.readTextFile(srcFile);
+      const content = await readFile(srcFile, "utf-8");
 
-      // Create target directory and write file (always overwrite)
-      await Deno.mkdir(dstDir, { recursive: true });
-      await Deno.writeTextFile(dstFile, content);
+      await mkdir(dstDir, { recursive: true });
+      await writeFile(dstFile, content);
       skills[entry.name] = "installed";
     }
   }
@@ -188,7 +178,7 @@ if (import.meta.main) {
         error: "Cannot determine script directory",
       }),
     );
-    Deno.exit(1);
+    process.exit(1);
   }
   try {
     const result = await runInit(sourceDir);
@@ -197,6 +187,6 @@ if (import.meta.main) {
     console.log(
       JSON.stringify({ success: false, error: (error as Error).message }),
     );
-    Deno.exit(1);
+    process.exit(1);
   }
 }
