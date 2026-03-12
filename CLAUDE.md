@@ -85,6 +85,10 @@ See `.llm-artefacts/user-decisions.md` for the full list. Highlights:
 
 Claude Code skills (`aq-work`, `aq-plan`) live in `skills/` in this repo. This is the **source of truth**. `agentq-init` copies them to `.claude/skills/` in the target project. Never edit installed copies directly.
 
+## Releasing
+
+Run `bun run release <major|minor|patch>` **on `main` after merging**, not on feature branches. The release script creates a version commit and tag that must live on `main`. The pre-push hook enforces this by blocking pushes to `main` unless the commit is at a version tag.
+
 ## Conventions
 
 - Public API from `agentqctl.ts`: `dispatch`, `runCommand`.
