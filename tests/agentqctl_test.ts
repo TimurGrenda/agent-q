@@ -1889,7 +1889,7 @@ describe("loadMeta corruption", () => {
 
   it("rejects missing meta.json", async () => {
     // Delete meta.json
-    await rm(`${tempDir}/agentq/meta.json`, { recursive: true });
+    await rm(`${tempDir}/agentq/meta.json`);
 
     const planFile = `${tempDir}/_tmp.md`;
     await writeFile(planFile, "# Plan\n");
