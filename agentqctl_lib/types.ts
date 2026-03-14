@@ -34,6 +34,7 @@ export interface TaskData {
 export interface MetaData {
   nextId: number;
   initVersion?: string;
+  schemaVersion?: number;
 }
 
 export type JsonObject = Record<string, unknown>;
