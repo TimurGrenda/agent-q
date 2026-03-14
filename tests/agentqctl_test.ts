@@ -1928,12 +1928,14 @@ describe("dispatch error paths", () => {
     );
   });
 
-  it("rejects empty args", async () => {
-    await assertRejects(
-      () => dispatch([], tempDir),
-      Error,
-      "Unknown command: undefined",
-    );
+  it("returns usage for empty args", async () => {
+    const result = await dispatch([], tempDir);
+    assertEquals(typeof (result as Record<string, unknown>).usage, "string");
+  });
+
+  it("returns usage for --help flag", async () => {
+    const result = await dispatch(["--help"], tempDir);
+    assertEquals(typeof (result as Record<string, unknown>).usage, "string");
   });
 
   it("rejects unknown epic subcommand", async () => {

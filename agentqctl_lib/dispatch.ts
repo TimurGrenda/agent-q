@@ -14,6 +14,23 @@ const STRING_FLAGS = [
   "status",
 ];
 
+const BOOLEAN_FLAGS = ["help"];
+
+function buildUsage(): CommandExecution {
+  const lines: string[] = ["agentqctl — task/epic manager for AI agents", ""];
+  for (const [name, node] of Object.entries(COMMANDS)) {
+    if (node.subcommands) {
+      for (const sub of Object.keys(node.subcommands)) {
+        lines.push(`  ${name} ${sub}`);
+      }
+    }
+    if (node.run) {
+      lines.push(`  ${name}`);
+    }
+  }
+  return { output: { usage: lines.join("\n") } };
+}
+
 function normalizeParsedArgs(raw: Record<string, unknown>): ParsedCliArgs {
   const positional = Array.isArray(raw._) ? raw._.map(String) : [];
 
@@ -34,14 +51,17 @@ export async function runCommand(
   args: string[],
   root = ".",
 ): Promise<CommandExecution> {
-  const parsedRaw = parseArgs(args, { string: STRING_FLAGS }) as Record<
-    string,
-    unknown
-  >;
+  const parsedRaw = parseArgs(args, {
+    string: STRING_FLAGS,
+    boolean: BOOLEAN_FLAGS,
+  }) as Record<string, unknown>;
   const parsed = normalizeParsedArgs(parsedRaw);
   const [command, subcommand] = parsed._;
 
-  const node = command ? COMMANDS[command] : undefined;
+  // Show usage when no command given or --help flag is set
+  if (!command || parsedRaw.help === true) return buildUsage();
+
+  const node = COMMANDS[command];
   if (!node) throw new Error(`Unknown command: ${command}`);
 
   const ctx: CommandContext = {
