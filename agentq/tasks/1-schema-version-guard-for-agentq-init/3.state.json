@@ -2,13 +2,23 @@
   "id": "1-schema-version-guard-for-agentq-init.3",
   "epic": "1-schema-version-guard-for-agentq-init",
   "title": "Add tests for schema-version scenarios",
-  "status": "todo",
+  "status": "done",
   "dependsOn": [
     2
   ],
-  "assignee": null,
-  "evidence": null,
+  "assignee": "Timur",
+  "evidence": {
+    "commit": "ed162b9",
+    "review": {
+      "rounds": 1,
+      "codex": "PASS",
+      "pedant": "PASS",
+      "architect": "PASS",
+      "breaker": "PASS",
+      "result": "PASS"
+    }
+  },
   "blockReason": null,
   "createdAt": "2026-03-14T18:00:42.358Z",
-  "updatedAt": "2026-03-14T18:00:42.358Z"
+  "updatedAt": "2026-03-14T18:45:43.944Z"
 }

@@ -143,6 +143,28 @@ Build a mental model of:
 **NEVER read or write files in the `agentq/` directory directly.** All state access
 MUST go through `agentq/agentqctl` commands.
 
+## Command Reference
+
+Only these commands exist. Do NOT guess or invent others (e.g., `epic list` does not exist).
+
+| Command | Description |
+|---------|-------------|
+| `epic create --title T --file F` | Create epic (scaffolding state) |
+| `epic finalize [epic-id]` | Finalize scaffolding epic → open |
+| `task create --title T --file F [--deps D]` | Add task to scaffolding epic |
+| `task set-deps <task-id> --deps D` | Update task dependencies |
+| `start <task-id>` | Assign task, move to in_progress |
+| `done <task-id> [--summary S] [--evidence E]` | Mark task done |
+| `review <task-id>` | Move task to code_review |
+| `block <task-id> --reason R` | Block a task |
+| `unblock <task-id>` | Unblock → todo |
+| `ready --epic E` | List tasks with all deps met |
+| `next --epic E` | Scheduler: what to do next |
+| `show <id>` | Show epic or task state JSON |
+| `cat <id>` | Show epic or task plan markdown |
+| `list` | List all epics with their tasks |
+| `tasks --epic E [--status S]` | List tasks for an epic |
+
 ## Phase 3: Output
 
 Two deliverables: plan files written via CLI commands, and agent-q epic + tasks.
