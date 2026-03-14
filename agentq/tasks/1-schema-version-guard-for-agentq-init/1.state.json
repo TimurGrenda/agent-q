@@ -1,0 +1,22 @@
+{
+  "id": "1-schema-version-guard-for-agentq-init.1",
+  "epic": "1-schema-version-guard-for-agentq-init",
+  "title": "Create schema-version file and update MetaData type",
+  "status": "done",
+  "dependsOn": [],
+  "assignee": "Timur",
+  "evidence": {
+    "commit": "eb50f44",
+    "review": {
+      "rounds": 1,
+      "codex": "PASS",
+      "pedant": "PASS",
+      "architect": "PASS",
+      "breaker": "PASS",
+      "result": "PASS"
+    }
+  },
+  "blockReason": null,
+  "createdAt": "2026-03-14T18:00:10.053Z",
+  "updatedAt": "2026-03-14T18:14:01.863Z"
+}

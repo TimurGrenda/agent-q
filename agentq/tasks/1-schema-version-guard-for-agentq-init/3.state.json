@@ -1,0 +1,14 @@
+{
+  "id": "1-schema-version-guard-for-agentq-init.3",
+  "epic": "1-schema-version-guard-for-agentq-init",
+  "title": "Add tests for schema-version scenarios",
+  "status": "todo",
+  "dependsOn": [
+    2
+  ],
+  "assignee": null,
+  "evidence": null,
+  "blockReason": null,
+  "createdAt": "2026-03-14T18:00:42.358Z",
+  "updatedAt": "2026-03-14T18:00:42.358Z"
+}

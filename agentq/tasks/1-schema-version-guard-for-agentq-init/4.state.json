@@ -1,0 +1,14 @@
+{
+  "id": "1-schema-version-guard-for-agentq-init.4",
+  "epic": "1-schema-version-guard-for-agentq-init",
+  "title": "Update README, CHANGELOG, and user-decisions",
+  "status": "todo",
+  "dependsOn": [
+    3
+  ],
+  "assignee": null,
+  "evidence": null,
+  "blockReason": null,
+  "createdAt": "2026-03-14T18:00:55.220Z",
+  "updatedAt": "2026-03-14T18:00:55.220Z"
+}

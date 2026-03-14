@@ -1,0 +1,14 @@
+{
+  "id": "1-schema-version-guard-for-agentq-init.2",
+  "epic": "1-schema-version-guard-for-agentq-init",
+  "title": "Add schema-version logic to agentq-init.ts",
+  "status": "code_review",
+  "dependsOn": [
+    1
+  ],
+  "assignee": "Timur",
+  "evidence": null,
+  "blockReason": null,
+  "createdAt": "2026-03-14T18:00:27.410Z",
+  "updatedAt": "2026-03-14T18:16:33.136Z"
+}

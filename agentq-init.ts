@@ -50,6 +50,23 @@ export async function runInit(
   );
   const version: string | undefined = sourceDenoJson.version;
 
+  // Read schema-version from source (single integer, source of truth for storage format).
+  // Uses Number() instead of parseInt() to reject trailing garbage like "1beta" or "1.5".
+  // Wraps the read in try/catch so a missing file produces a friendly error, not a stack trace.
+  let sourceSchemaVersion: number;
+  try {
+    const trimmed = (await Deno.readTextFile(`${sourceDir}/schema-version`)).trim();
+    sourceSchemaVersion = Number(trimmed);
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) {
+      throw new Error("schema-version file is missing or not a valid integer");
+    }
+    throw e;
+  }
+  if (!Number.isInteger(sourceSchemaVersion)) {
+    throw new Error("schema-version file is missing or not a valid integer");
+  }
+
   // ── 2. Create state directories (idempotent) ───────────────────────────
 
   const base = `${targetDir}/agentq`;
@@ -79,6 +96,22 @@ export async function runInit(
       throw e;
     }
   }
+  // Schema-version guard: refuse to overwrite scripts if state format has changed.
+  // Legacy installs (no schemaVersion in meta.json) are treated as version 1.
+  // Coerces through Number() so a string "1" in hand-edited meta.json doesn't false-reject.
+  // TODO(1-schema-version-guard-for-agentq-init.3): mismatch test coverage added in task 3
+  if (stateStatus === "exists") {
+    const raw = (meta as Record<string, unknown>).schemaVersion;
+    const installedSchema = raw == null ? 1 : Number(raw);
+    if (installedSchema !== sourceSchemaVersion) {
+      throw new Error(
+        `Schema version mismatch: installed state is v${installedSchema}, ` +
+        `source is v${sourceSchemaVersion}. ` +
+        `Back up agentq/, remove it, and re-run agentq-init.`,
+      );
+    }
+  }
+  meta.schemaVersion = sourceSchemaVersion;
   if (version) {
     meta.initVersion = version;
   }

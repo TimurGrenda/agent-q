@@ -133,6 +133,8 @@ describe("agentq-init: missing skills directory", () => {
       `${fakeSource}/deno.json`,
       JSON.stringify({ version: "0.0.0-test" }, null, 2) + "\n",
     );
+    // schema-version is required for schema-version guard
+    await Deno.writeTextFile(`${fakeSource}/schema-version`, "1\n");
 
     const result = await runInit(fakeSource, tempDir);
     assertEquals(result.skills, {});
