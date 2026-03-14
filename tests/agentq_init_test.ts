@@ -3,7 +3,7 @@
 // missing skills handling, and integration with dispatch.
 
 import { afterEach, describe, it } from "@std/testing/bdd";
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { runInit } from "../agentq-init.ts";
 import { dispatch } from "../agentqctl.ts";
 import { withActor } from "./test_support.ts";
@@ -37,6 +37,7 @@ describe("agentq-init: fresh install", () => {
       await Deno.readTextFile(`${tempDir}/agentq/meta.json`),
     );
     assertEquals(meta.nextId, 1);
+    assertEquals(meta.schemaVersion, 1);
 
     // Verify .gitkeep files exist (plans/ no longer created)
     for (const sub of ["epics", "tasks", "logs"]) {
@@ -91,21 +92,23 @@ describe("agentq-init: idempotent re-run", () => {
     // First run
     await runInit(sourceDir, tempDir);
 
-    // Modify meta.json to simulate usage (nextId advanced to 5)
+    // Modify meta.json to simulate usage (nextId advanced to 5).
+    // Include schemaVersion so the re-run schema guard doesn't reject it.
     await Deno.writeTextFile(
       `${tempDir}/agentq/meta.json`,
-      JSON.stringify({ nextId: 5 }, null, 2) + "\n",
+      JSON.stringify({ nextId: 5, schemaVersion: 1 }, null, 2) + "\n",
     );
 
     // Second run
     const result = await runInit(sourceDir, tempDir);
     assertEquals(result.state, "exists");
 
-    // meta.json NOT overwritten — nextId preserved
+    // meta.json NOT overwritten — nextId preserved, schemaVersion stamped
     const meta = JSON.parse(
       await Deno.readTextFile(`${tempDir}/agentq/meta.json`),
     );
     assertEquals(meta.nextId, 5);
+    assertEquals(meta.schemaVersion, 1);
   });
 });
 
@@ -138,6 +141,63 @@ describe("agentq-init: missing skills directory", () => {
 
     const result = await runInit(fakeSource, tempDir);
     assertEquals(result.skills, {});
+  });
+});
+
+describe("agentq-init: schema version mismatch", () => {
+  let tempDir: string;
+
+  afterEach(async () => {
+    if (tempDir) await Deno.remove(tempDir, { recursive: true });
+  });
+
+  it("rejects re-init when installed schemaVersion differs from source", async () => {
+    tempDir = await Deno.makeTempDir();
+
+    // First run: stamps schemaVersion: 1
+    await runInit(sourceDir, tempDir);
+
+    // Manually set schemaVersion to 99 to simulate a future/incompatible version
+    const metaPath = `${tempDir}/agentq/meta.json`;
+    const meta = JSON.parse(await Deno.readTextFile(metaPath));
+    meta.schemaVersion = 99;
+    await Deno.writeTextFile(metaPath, JSON.stringify(meta, null, 2) + "\n");
+
+    // Second run: should reject with a schema mismatch error
+    await assertRejects(
+      () => runInit(sourceDir, tempDir),
+      Error,
+      "Schema version mismatch",
+    );
+  });
+});
+
+describe("agentq-init: legacy state without schemaVersion", () => {
+  let tempDir: string;
+
+  afterEach(async () => {
+    if (tempDir) await Deno.remove(tempDir, { recursive: true });
+  });
+
+  it("succeeds and stamps schemaVersion when legacy meta.json has no schemaVersion", async () => {
+    tempDir = await Deno.makeTempDir();
+
+    // First run: creates state with schemaVersion: 1
+    await runInit(sourceDir, tempDir);
+
+    // Remove schemaVersion from meta.json to simulate a legacy install
+    const metaPath = `${tempDir}/agentq/meta.json`;
+    const meta = JSON.parse(await Deno.readTextFile(metaPath));
+    delete meta.schemaVersion;
+    await Deno.writeTextFile(metaPath, JSON.stringify(meta, null, 2) + "\n");
+
+    // Second run: should succeed (legacy = v1, source = v1, no mismatch)
+    const result = await runInit(sourceDir, tempDir);
+    assertEquals(result.state, "exists");
+
+    // schemaVersion should be stamped back
+    const updatedMeta = JSON.parse(await Deno.readTextFile(metaPath));
+    assertEquals(updatedMeta.schemaVersion, 1);
   });
 });
 

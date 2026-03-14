@@ -99,7 +99,6 @@ export async function runInit(
   // Schema-version guard: refuse to overwrite scripts if state format has changed.
   // Legacy installs (no schemaVersion in meta.json) are treated as version 1.
   // Coerces through Number() so a string "1" in hand-edited meta.json doesn't false-reject.
-  // TODO(1-schema-version-guard-for-agentq-init.3): mismatch test coverage added in task 3
   if (stateStatus === "exists") {
     const raw = (meta as Record<string, unknown>).schemaVersion;
     const installedSchema = raw == null ? 1 : Number(raw);
