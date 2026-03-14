@@ -25,6 +25,8 @@ agentq-init
 
 This creates an `agentq/` directory for state and installs two Claude Code skills: `/aq-plan` and `/aq-work`.
 
+Re-running `agentq-init` upgrades the CLI scripts if the schema version matches. If the installed state uses a different schema version, it errors out with a backup hint instead of overwriting.
+
 ## Usage
 
 Everything happens through Claude Code slash commands.
